@@ -1,0 +1,51 @@
+---
+title: "Project"
+author: "Kyle Evans and Eric Graham"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## ANALYSIS 1:
+
+**Assume that Century 21 Ames (a real estate company) in Ames Iowa has commissioned you to answer a very important question with respect to their business. Century 21 Ames only sells houses in the NAmes, Edwards and BrkSide neighborhoods and would like to simply get an estimate of how the SalePrice of the house is related to the square footage of the living area of the house (GrLIvArea) and if the SalesPrice (and its relationship to square footage) depends on which neighborhood the house is located in. Build and fit a model that will answer this question, keeping in mind that realtors prefer to talk about living area in increments of 100 sq. ft. Provide your client with the estimate (or estimates if it varies by neighborhood) as well as confidence intervals for any estimate(s) you provide. It turns out that Century 21’s leadership team has a member that has some statistical background. Therefore, make sure and provide evidence that the model assumptions are met and that any suspicious observations (outliers / influential observations) have been identified and addressed. Finally, of course, provide your client with a well written conclusion that quantifies the relationship between living area and sale price with respect to these three neighborhoods. Remember that the company is only concerned with the three neighborhoods they sell in.**
+
+Create a visual GUI to browse the data at will.
+
+```{r}
+
+library(data.table)
+library(dplyr)
+
+data = fread('train.csv')
+
+explore(data)
+
+```
+
+Create an automatic EDA report
+
+```{r}
+
+library(DataExplorer)
+
+DataExplorer::create_report(data, output_file = "Data_Explorer_EDA.html")
+
+```
+
+The EDA report shows some missing data, so let's dive into that deeper.
+
+```{r}
+
+library(naniar)
+
+missings <- data %>% 
+  select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+```
