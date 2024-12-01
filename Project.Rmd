@@ -9,20 +9,27 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## ANALYSIS 1:
+## General EDA
 
-**Assume that Century 21 Ames (a real estate company) in Ames Iowa has commissioned you to answer a very important question with respect to their business. Century 21 Ames only sells houses in the NAmes, Edwards and BrkSide neighborhoods and would like to simply get an estimate of how the SalePrice of the house is related to the square footage of the living area of the house (GrLIvArea) and if the SalesPrice (and its relationship to square footage) depends on which neighborhood the house is located in. Build and fit a model that will answer this question, keeping in mind that realtors prefer to talk about living area in increments of 100 sq. ft. Provide your client with the estimate (or estimates if it varies by neighborhood) as well as confidence intervals for any estimate(s) you provide. It turns out that Century 21’s leadership team has a member that has some statistical background. Therefore, make sure and provide evidence that the model assumptions are met and that any suspicious observations (outliers / influential observations) have been identified and addressed. Finally, of course, provide your client with a well written conclusion that quantifies the relationship between living area and sale price with respect to these three neighborhoods. Remember that the company is only concerned with the three neighborhoods they sell in.**
-
-Create a visual GUI to browse the data at will.
+Load the data
 
 ```{r}
 
 library(data.table)
 library(dplyr)
 
-data = fread('train.csv')
+data = fread('data/train.csv')
+
+```
+
+Create a visual GUI to browse the data at will.
+
+```{r}
+
+library(explore)
 
 explore(data)
+
 
 ```
 
@@ -47,5 +54,255 @@ missings <- data %>%
 
 gg_miss_var(missings)
 gg_miss_var(missings, show_pct = TRUE)
+
+```
+
+## ANALYSIS 1:
+
+**Assume that Century 21 Ames (a real estate company) in Ames Iowa has commissioned you to answer a very important question with respect to their business. Century 21 Ames only sells houses in the NAmes, Edwards and BrkSide neighborhoods and would like to simply get an estimate of how the SalePrice of the house is related to the square footage of the living area of the house (GrLIvArea) and if the SalesPrice (and its relationship to square footage) depends on which neighborhood the house is located in. Build and fit a model that will answer this question, keeping in mind that realtors prefer to talk about living area in increments of 100 sq. ft. Provide your client with the estimate (or estimates if it varies by neighborhood) as well as confidence intervals for any estimate(s) you provide. It turns out that Century 21’s leadership team has a member that has some statistical background. Therefore, make sure and provide evidence that the model assumptions are met and that any suspicious observations (outliers / influential observations) have been identified and addressed. Finally, of course, provide your client with a well written conclusion that quantifies the relationship between living area and sale price with respect to these three neighborhoods. Remember that the company is only concerned with the three neighborhoods they sell in.**
+
+Filter and select the relevant data, then look at assumptions. From initial observatsions on the raw data, there does seem to be a general positive, linear relationship between GrLiveArea and SalePrice. However, the SalePrice data look to be right skewed, particularly in the Edwards and NAmes neighborhoods. Additionally, with the Edwards neighborhood, there seem to be several highly influential and high leverage points. Will readdress these points with a log of SalesPrice in the next code block.
+
+```{r}
+library(ggplot2)
+library(GGally)
+
+unique(data$Neighborhood)
+
+data_filtered <- data %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide')) %>% 
+  dplyr::select(SalePrice, GrLivArea, Neighborhood) %>% 
+  dplyr::mutate(
+    Neighborhood = as.factor(Neighborhood)
+  )
+
+ggpairs(data_filtered)
+
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(vars(Neighborhood))
+
+data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
+  geom_histogram() +
+  facet_grid(vars(Neighborhood))
+
+data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
+  geom_boxplot()
+
+```
+
+The log transformation of SalePrice has helped a significant amount to settle down outliers and improve normality, however, there do seem to still be two significant outliers in the Edwards neighborhood. NOTE: address this later?
+
+```{r}
+
+
+data_filtered <- data_filtered %>% 
+  mutate(
+    SalePrice = log(SalePrice)
+  )
+
+ggpairs(data_filtered)
+
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(vars(Neighborhood))
+
+data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
+  geom_histogram() + 
+  facet_grid(vars(Neighborhood))
+
+data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
+  geom_boxplot()
+```
+
+For now, keeping outliers in.
+
+As expected, m0 has smallest adjusted R2, not taking into account Neighborhood at all. M1 improves upon M0. Interestingly M2 and M3 have the same adjusted R2, implying that the increased complexity of M3 does not help the model at all and can be left out. M4 and M5 both improve over M2 and M3 and also have the same adjusted R2. Similarly, this suggests that the added complexity of M5 over M4 is unnecessary.
+
+```{r}
+
+library(stringr)
+
+#baseline, without neighborhood
+m0 = lm(SalePrice ~ GrLivArea, data = data_filtered)
+s0 = summary(m0)
+
+#addative effect model, no interaction
+m1 = lm(SalePrice ~ GrLivArea + Neighborhood, data = data_filtered)
+s1 = summary(m1)
+
+#interaction only model
+m2 = lm(SalePrice ~ GrLivArea:Neighborhood, data = data_filtered)
+s2 = summary(m2)
+
+#GrLiveArea effect + Interaction
+m3 = lm(SalePrice ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
+s3 = summary(m3)
+
+#Neighborhood effect + Interaction
+m4 = lm(SalePrice ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s4 = summary(m4)
+
+#GrLiveArea and Neighborhood effect + Interaction
+m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s5 = summary(m5)
+
+
+str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
+str_glue("M1 - Adjusted R2: {s1$adj.r.squared}")
+str_glue("M2 - Adjusted R2: {s2$adj.r.squared}")
+str_glue("M3 - Adjusted R2: {s3$adj.r.squared}")
+str_glue("M4 - Adjusted R2: {s4$adj.r.squared}")
+str_glue("M5 - Adjusted R2: {s5$adj.r.squared}")
+
+```
+
+Nested Model Significance testing shows exactly what we thought it would above.
+
+```{r}
+
+t0_1 = anova(m0, m1)  
+t1_2 = anova(m1, m2)  
+t2_3 = anova(m2, m3) 
+t3_4 = anova(m3, m4)  
+t4_5 = anova(m4, m5)  
+
+str_glue("M0 vs M1 - Pvalue: {t0_1$`Pr(>F)`[[2]]}")
+str_glue("M1 vs M2 - Pvalue: {t1_2$`Pr(>F)`[[2]]}")
+str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
+str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
+str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
+
+```
+
+Let's take a closer look at the outiers in the Edwards Neighborhood. Properties with ID'S 1299 and 524 are much larger than all the others in the neighborhood, by at least 2x. Unlikely that this is a data recording error, but possible. By removing these two data points, increase the adjusted R2 of our best model (M4) by 8%. In keeping with "all models are wrong but some are useful", it may be presenting this "wrong" model to the company with the caveat that it should only be used with houses 3000 sq ft or below. Very likely the improvement in accuracy is worth this trade off as there does large houses seem to be very rare. This sample suggests 2 out of \~380.
+
+```{r}
+
+data_edwards <- data %>% filter(Neighborhood == "Edwards") %>%  select(order(colnames(.)))
+#View(data_edwards)
+
+data_filtered <- data %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
+  dplyr::select(SalePrice, GrLivArea, Neighborhood, Id) %>% 
+  dplyr::mutate(
+    Neighborhood = as.factor(Neighborhood),
+    SalePrice = log(SalePrice)
+  )
+
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(vars(Neighborhood))
+
+#baseline, without neighborhood
+m0 = lm(SalePrice ~ GrLivArea, data = data_filtered)
+s0 = summary(m0)
+
+#addative effect model, no interaction
+m1 = lm(SalePrice ~ GrLivArea + Neighborhood, data = data_filtered)
+s1 = summary(m1)
+
+#interaction only model
+m2 = lm(SalePrice ~ GrLivArea:Neighborhood, data = data_filtered)
+s2 = summary(m2)
+
+#GrLiveArea effect + Interaction
+m3 = lm(SalePrice ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
+s3 = summary(m3)
+
+#Neighborhood effect + Interaction
+m4 = lm(SalePrice ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s4 = summary(m4)
+
+#GrLiveArea and Neighborhood effect + Interaction
+m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s5 = summary(m5)
+
+
+str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
+str_glue("M1 - Adjusted R2: {s1$adj.r.squared}")
+str_glue("M2 - Adjusted R2: {s2$adj.r.squared}")
+str_glue("M3 - Adjusted R2: {s3$adj.r.squared}")
+str_glue("M4 - Adjusted R2: {s4$adj.r.squared}")
+str_glue("M5 - Adjusted R2: {s5$adj.r.squared}")
+
+t0_1 = anova(m0, m1)  
+t1_2 = anova(m1, m2)  
+t2_3 = anova(m2, m3) 
+t3_4 = anova(m3, m4)  
+t4_5 = anova(m4, m5)  
+
+str_glue("M0 vs M1 - Pvalue: {t0_1$`Pr(>F)`[[2]]}")
+str_glue("M1 vs M2 - Pvalue: {t1_2$`Pr(>F)`[[2]]}")
+str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
+str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
+str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
+
+```
+
+For completeness sake, we can log transform the GrLivArea. This transformation results in the same best model of M4, with practically the same adjusted R2 of .52. In keeping with the idea of parsimony, the easy of interpretation with the log-linear model without outliers, may be more practical than this log-log model with those outliers included.
+
+```{r}
+
+data_filtered <- data %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
+  dplyr::select(SalePrice, GrLivArea, Neighborhood, Id) %>% 
+  dplyr::mutate(
+    Neighborhood = as.factor(Neighborhood),
+    GrLivArea = log(GrLivArea),
+    SalePrice = log(SalePrice)
+  )
+
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(vars(Neighborhood))
+
+#baseline, without neighborhood
+m0 = lm(SalePrice ~ GrLivArea, data = data_filtered)
+s0 = summary(m0)
+
+#addative effect model, no interaction
+m1 = lm(SalePrice ~ GrLivArea + Neighborhood, data = data_filtered)
+s1 = summary(m1)
+
+#interaction only model
+m2 = lm(SalePrice ~ GrLivArea:Neighborhood, data = data_filtered)
+s2 = summary(m2)
+
+#GrLiveArea effect + Interaction
+m3 = lm(SalePrice ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
+s3 = summary(m3)
+
+#Neighborhood effect + Interaction
+m4 = lm(SalePrice ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s4 = summary(m4)
+
+#GrLiveArea and Neighborhood effect + Interaction
+m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s5 = summary(m5)
+
+
+str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
+str_glue("M1 - Adjusted R2: {s1$adj.r.squared}")
+str_glue("M2 - Adjusted R2: {s2$adj.r.squared}")
+str_glue("M3 - Adjusted R2: {s3$adj.r.squared}")
+str_glue("M4 - Adjusted R2: {s4$adj.r.squared}")
+str_glue("M5 - Adjusted R2: {s5$adj.r.squared}")
+
+t0_1 = anova(m0, m1)  
+t1_2 = anova(m1, m2)  
+t2_3 = anova(m2, m3) 
+t3_4 = anova(m3, m4)  
+t4_5 = anova(m4, m5)  
+
+str_glue("M0 vs M1 - Pvalue: {t0_1$`Pr(>F)`[[2]]}")
+str_glue("M1 vs M2 - Pvalue: {t1_2$`Pr(>F)`[[2]]}")
+str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
+str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
+str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
 ```
