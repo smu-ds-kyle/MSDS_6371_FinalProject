@@ -439,7 +439,7 @@ data_all <- impute_vals$ximp
 
 ```
 
-#### Simple Linear Regression Model 
+#### Simple Linear Regression Model
 
 To find the best simple linear model, we loop through all the continuous variables and fit a model. To perhaps no surprise, the best model was GrLivArea. Since we already fit this model in analysis one, we moved to the next highest adj r2, which was GarageCars. This model had debatable diagnostic plots, so we moved to the next highest which was GarageArea. This model fits the diagnostic plots very well, except for 4 outliers where the garage size is abnormally large. Like GrlLivArea, we will suggest the use of this model in a range. In this instance, between 0 and 1250 sq ft.
 
@@ -497,9 +497,134 @@ generate_diagnosticPlots(m)
 
 ```
 
+Model Statistics and Predictions
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+num_cores <- parallel::detectCores() - 2
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
+model <- train(SalePrice ~ GarageArea, data = data_all, method = "lm", trControl = ctrl)
+
+cv_predictions <- model$pred
+residuals <- cv_predictions$obs - cv_predictions$pred
+
+pressStat <- sum(residuals^2)
+
+summary(model)
+print(model)
+
+aic <- AIC(model$finalModel)
+str_glue("AIC: {aic} \n")
+
+bic_value <- BIC(final_model)
+str_glue("BIC: {bic_value} \n")
+
+stopCluster(cl)
+
+```
+
 #### Multiple Linear Regression - Feature Analysis/Selection
 
-MASS library can target AIC by doing stepwise feature selection. Using "Both" in this instance.
+##### Continuous Variable Analysis
+
+Looking for multi-collinearity with CAR package. It would seem GrLivArea has perfect collineratity with several other variables, which we will remove.
+
+For GrLivArea: FirstFlrSF, SecondFlrSF, LowQualFinSF
+
+For TotalBsmtSF: BsmtFinSF1, BsmtFinSF2, BsmtUnfSF
+
+```{r}
+
+library(car)
+
+data_continuous <- data_all %>% select_if(is.numeric)
+base_model <- lm(SalePrice ~., data = data_continuous)
+alias(SalePrice ~., data = data_continuous)
+
+col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF')
+
+data_continuous_clean <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
+
+base_model_clean <- lm(SalePrice ~., data = data_continuous_clean)
+vifs <- vif(base_model_clean)
+
+print(vifs)
+
+# # Compute correlation matrix
+# cor_matrix <- cor(data_continuous_clean, use = "pairwise.complete.obs")
+# 
+# # Extract correlations with GrLivArea
+# grlivarea_cor <- cor_matrix["GrLivArea", ]
+# 
+# # Sort correlations in decreasing order
+# grlivarea_cor_sorted <- sort(abs(grlivarea_cor), decreasing = TRUE)
+# 
+# print(grlivarea_cor_sorted)
+```
+
+After removing perfect collinearity, vif() was able to run. Some research seems to suggest that a VIF of greater than 5 show's high correlation to other variables in the mode. I suspect that garagecars and garagearea are related, so let's try removing one of those and checking vif again.
+
+```{r}
+
+library(car)
+
+data_continuous <- data_all %>% select_if(is.numeric)
+
+col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF', 'GarageArea')
+data_continuous_clean_t1 <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
+base_model_clean_t1<- lm(SalePrice ~., data = data_continuous_clean_t1)
+vifs_t1 <- vif(base_model_clean_t1) 
+print(vifs_t1)
+
+
+col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF', 'GarageArea', 'GrLivArea')
+data_continuous_clean_t2 <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
+base_model_clean_t2<- lm(SalePrice ~., data = data_continuous_clean_t2)
+vifs_t2 <- vif(base_model_clean_t2) 
+print(vifs_t2)
+```
+
+##### Categorical Variable Analysis
+
+Not sure this was helpful as it seems to suggest everything is statistically relevant. Though maybe it would be helpful to take the most relevant ones.
+
+Neighborhood, ExterQual, KitchenQual, Foundation, GarageFinish, BsmtQual, OverallQual, GarageType
+
+```{r}
+
+data_cata <- data_all %>% select_if(is.factor)
+
+print('ANOVA TESTS')
+for (var in names(data_cata)) {
+  formula <- as.formula(paste("SalePrice ~", var))
+  anova_result <- aov(formula, data = data_all)
+  p_value <- summary(anova_result)[[1]][["Pr(>F)"]][1]
+  if (p_value < 0.05) {
+    cat("Variable:", var, "- p-value:", p_value, "\n")
+  }
+}
+
+
+print('KRUSKAL-WALLIS TEST')
+for (var in names(data_cata)) {
+  formula <- as.formula(paste("SalePrice ~", var))
+  kruskal_result <- kruskal.test(formula, data = data_all)
+  p_value <- kruskal_result$p.value
+  cat("Variable:", var, "- p-value:", p_value, "\n")
+}
+
+
+```
+
+##### Combined/Advanced Feature Selection Techniques
+
+MASS library can target AIC by doing stepwise feature selection. Using "Both" in this instance. This will be one model that we test in the paper.
 
 ```{r}
 
@@ -511,31 +636,168 @@ step_model <- stepAIC(model, direction = "both", trace = FALSE)
 
 ```
 
-Looking for multi-collinearity with CAR package. Currently errors because we have perfect collinearity in the model. Will try to fix later.
+Limited Leaps as a full run would take too long. This particular run, the same model had the highest CP, BIC, and ADJR2, which was:
 
-```{r}
-
-library(car)
-
-base_model <- lm(SalePrice ~., data = data_all)
-
-alias(SalePrice ~., data = data_all)
-
-cor(data_continuous)
-
-vifs <- vif(base_model)
-
-```
-
-Limited Leaps as a full run would take too long.
+YearBuilt, YearRemoAdd, HeatingGasW, HalfBath, GarageQualPo
 
 ```{r}
 
 library(leaps)
 
-fit <- regsubsets(SalePrice ~ ., data = data_all, nvmax = 5, nbest = 5, method = 'exhaustive')
+fit <- regsubsets(SalePrice ~ ., data = data_all, nvmax = 4, nbest = 5, method = 'exhaustive', really.big = TRUE)
+
+fit_sum <- summary(fit)
+
+# Identify the best models according to different metrics
+best_adjr2_index <- which.max(fit_sum$adjr2)
+best_cp_index <- which.min(fit_sum$cp)
+best_bic_index <- which.min(fit_sum$bic)
+
+# Extract coefficients
+best_adjr2_model <- coef(fit, id = best_adjr2_index)
+best_cp_model <- coef(fit, id = best_cp_index)
+best_bic_model <- coef(fit, id = best_bic_index)
+
+print(best_adjr2_model)
+print(best_cp_model)
+print(best_bic_model)
+
+
+#par(mfrow = c(1, 2))
+#plot(fit, scale = "adjr2", main = "Adjusted R-squared")
+```
+
+Let's take the continuous columns we found in the VIF analysis and then the most significant categorical variables we found. Perhaps we can use LEAPS on this smaller set of options. If not exhaustive, we can do step-wise forward, backward, and both.
+
+```{r}
+
+library(leaps)
+library(dplyr)
+
+sig_cata <- c('Neighborhood', 'ExterQual', 'KitchenQual', 'Foundation', 'GarageFinish', 'BsmtQual', 'OverallQual', 'GarageType')
+
+continuous_cols <- data_all %>% select(all_of(names(vifs_t1)))
+cata_cols <- data_all %>% select(all_of(sig_cata))
+
+candidate_data <- cbind(continuous_cols, cata_cols)
+
+model_mat <- model.matrix(~ ., data = candidate_data)[, -1]
+
+set.seed(100)
+fit_forward <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 20, nbest = 5, method = 'forward')
+
+set.seed(100)
+fit_backward <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 36, nbest = 5, method = 'backward')
+
+set.seed(100)
+fit_both <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 36, nbest = 5, method = 'seqrep')
+
+fit_sum <- summary(fit_forward)
+
+
+# 
+# # Identify the best models according to different metrics
+# best_adjr2_index <- which.max(fit_sum$adjr2)
+# best_cp_index <- which.min(fit_sum$cp)
+# best_bic_index <- which.min(fit_sum$bic)
+# 
+# # Extract coefficients
+# best_adjr2_model <- coef(fit, id = best_adjr2_index)
+# best_cp_model <- coef(fit, id = best_cp_index)
+# best_bic_model <- coef(fit, id = best_bic_index)
+# 
+# print(best_adjr2_model)
+# print(best_cp_model)
+# print(best_bic_model)
+
 
 ```
+
+Research suggested using Boruta as a way to suggest features. This did not seem to help narrow it down at all, but to be fair, we haven't studied this and I'm not entirely sure what it is doing, but was hopeful it might point in the right direction. The idea was that if x number of selection techniques generally agreed, that would be a good sign.
+
+```{r}
+
+library(Boruta)
+
+set.seed(100)
+
+boruta_out <- Boruta(SalePrice ~ ., data = data_all, doTrace = 0)
+
+final_vars_tenative <- getSelectedAttributes(boruta_out, withTentative = TRUE)
+final_vars <- getSelectedAttributes(boruta_out, withTentative = FALSE)
+
+print('finals')
+print(final_vars)
+
+print('finals-with tentative')
+print(final_vars)
+
+```
+
+LASSO keeps coming up in my research for data sets with a large number of features. This look cool, not again, not sure what exactly it's doing as we haven't studied it.
+
+```{r}
+
+library(glmnet)
+
+x <- model.matrix(SalePrice ~ ., data = data_all)[, -1]
+y <- data_all$SalePrice
+
+lasso_cv <- cv.glmnet(x, y, alpha = 1)
+
+optimal_lambda <- lasso_cv$lambda.min
+
+lasso_model <- glmnet(x, y, alpha = 1, lambda = optimal_lambda)
+
+lasso_coefficients <- coef(lasso_model)
+
+print(lasso_coefficients)
+
+```
+
+#### Multiple Linear Regression - Models
+
+M1 - Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M1 <- readRDS('models/potential_model_1.rds')
+generate_diagnosticPlots(M1)
+
+terms <- all.vars(terms(M1))
+
+data_M1 <- data_all %>% dplyr::select(all_of(terms))
+
+num_cores <- parallel::detectCores() - 2
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
+model <- train(SalePrice ~ ., data = data_M1, method = "lm", trControl = ctrl)
+
+cv_predictions <- model$pred
+residuals <- cv_predictions$obs - cv_predictions$pred
+
+pressStat <- sum(residuals^2)
+
+summary(model)
+print(model)
+
+aic <- AIC(model$finalModel)
+str_glue("AIC: {aic} \n")
+
+bic_value <- BIC(final_model)
+str_glue("BIC: {bic_value} \n")
+
+stopCluster(cl)
+
+
+```
+
+#### TBD SECTION
 
 Couldn't get this to run right. Maybe come back to it.
 
@@ -556,10 +818,8 @@ run_regsubsets <- function(group, r) {
   regsubsets(x = predictor_group, y = r, nvmax = 1, method = "exhaustive")
 }
 
-
 indices <- rep(1:ceiling(length(names(predictors)) / num_cores), each = num_cores)[1:length(names(predictors))]
 groups <- split(names(predictors), indices)
-
 
 results <- foreach(group = groups, .packages = c("leaps",'dplyr'), .export = c('data_all', 'response', "run_regsubsets")) %do% {
   predictor_group <- data_all %>% select(all_of(group))
