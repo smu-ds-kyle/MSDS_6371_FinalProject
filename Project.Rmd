@@ -9,6 +9,39 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Helper Functions
+
+```{r}
+
+generate_diagnosticPlots <- function(model){
+  
+par(mfrow = c(2, 2))  # Arrange plots in a 2x2 grid
+plot(model)
+par(mfrow = c(1, 1))  # 
+
+plot(model$fitted.values, model$residuals,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+qqnorm(model$residuals,
+       main = "Normal Q-Q Plot")
+qqline(model$residuals, col = "red")
+
+influencePlot(model)
+
+hist(model$residuals,
+     breaks = 20,
+     xlab = "Residuals",
+     main = "Histogram of Residuals",
+     col = "lightblue")
+}
+
+
+
+```
+
 ## General EDA
 
 Load the data
@@ -78,17 +111,6 @@ data_filtered <- data %>%
 
 ggpairs(data_filtered)
 
-data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
-  geom_point() +
-  geom_smooth(method = "lm") +
-  facet_grid(vars(Neighborhood))
-
-data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
-  geom_histogram() +
-  facet_grid(vars(Neighborhood))
-
-data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
-  geom_boxplot()
 
 ```
 
@@ -104,17 +126,7 @@ data_filtered <- data_filtered %>%
 
 ggpairs(data_filtered)
 
-data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
-  geom_point() +
-  geom_smooth(method = "lm") +
-  facet_grid(vars(Neighborhood))
 
-data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
-  geom_histogram() + 
-  facet_grid(vars(Neighborhood))
-
-data_filtered %>% ggplot(aes(x=SalePrice, colour = Neighborhood)) + 
-  geom_boxplot()
 ```
 
 For now, keeping outliers in.
@@ -148,6 +160,8 @@ s4 = summary(m4)
 #GrLiveArea and Neighborhood effect + Interaction
 m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
 s5 = summary(m5)
+
+
 
 
 str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
@@ -241,6 +255,7 @@ str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
 str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
 str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
+generate_diagnosticPlots(m4)
 ```
 
 For completeness sake, we can log transform the GrLivArea. This transformation results in the same best model of M4, with practically the same adjusted R2 of .52. In keeping with the idea of parsimony, the easy of interpretation with the log-linear model without outliers, may be more practical than this log-log model with those outliers included.
@@ -248,7 +263,7 @@ For completeness sake, we can log transform the GrLivArea. This transformation r
 ```{r}
 
 data_filtered <- data %>% 
-  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide')) %>% 
   dplyr::select(SalePrice, GrLivArea, Neighborhood, Id) %>% 
   dplyr::mutate(
     Neighborhood = as.factor(Neighborhood),
@@ -304,5 +319,271 @@ str_glue("M1 vs M2 - Pvalue: {t1_2$`Pr(>F)`[[2]]}")
 str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
 str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
 str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
+
+generate_diagnosticPlots(m4)
+```
+
+Often common to jump to log of money data, but let's check the linear model with no transformations. We can see from the diagnostic plots, that we there is evidence of moderate increasing variance as well as a right skewed histogram of the residuals. These problems are improved upon when the log of the sales price is used.
+
+```{r}
+
+data_filtered <- data %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
+  dplyr::select(SalePrice, GrLivArea, Neighborhood, Id)
+
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(vars(Neighborhood))
+
+#baseline, without neighborhood
+m0 = lm(SalePrice ~ GrLivArea, data = data_filtered)
+s0 = summary(m0)
+
+#addative effect model, no interaction
+m1 = lm(SalePrice ~ GrLivArea + Neighborhood, data = data_filtered)
+s1 = summary(m1)
+
+#interaction only model
+m2 = lm(SalePrice ~ GrLivArea:Neighborhood, data = data_filtered)
+s2 = summary(m2)
+
+#GrLiveArea effect + Interaction
+m3 = lm(SalePrice ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
+s3 = summary(m3)
+
+#Neighborhood effect + Interaction
+m4 = lm(SalePrice ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s4 = summary(m4)
+
+#GrLiveArea and Neighborhood effect + Interaction
+m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+s5 = summary(m5)
+
+
+str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
+str_glue("M1 - Adjusted R2: {s1$adj.r.squared}")
+str_glue("M2 - Adjusted R2: {s2$adj.r.squared}")
+str_glue("M3 - Adjusted R2: {s3$adj.r.squared}")
+str_glue("M4 - Adjusted R2: {s4$adj.r.squared}")
+str_glue("M5 - Adjusted R2: {s5$adj.r.squared}")
+
+t0_1 = anova(m0, m1)  
+t1_2 = anova(m1, m2)  
+t2_3 = anova(m2, m3) 
+t3_4 = anova(m3, m4)  
+t4_5 = anova(m4, m5)  
+
+str_glue("M0 vs M1 - Pvalue: {t0_1$`Pr(>F)`[[2]]}")
+str_glue("M1 vs M2 - Pvalue: {t1_2$`Pr(>F)`[[2]]}")
+str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
+str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
+str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
+
+generate_diagnosticPlots(m4)
+
+```
+
+## ANALYSIS 2
+
+**Build the most predictive model for sales prices of homes in all of Ames, Iowa.  This includes all neighborhoods. Your group is limited to only the techniques we have learned in 6371 (no random forests or other methods we have not yet covered).  Specifically, you should produce at least 2 competing models: a simple linear regression model (you pick the explanatory variable) and a multiple linear regression model (SalePrice\~GrLivArea + FullBath) and at least one additional multiple linear regression model where you select the explanatory variables.  Generate an adjusted R^2^, CV Press and Kaggle Score for each of these models and clearly describe which model you feel is the best in terms of being able to predict future sale prices of homes in Ames, Iowa.  In your paper, please include a table similar to the one below.  The group with the lowest public Kaggle score will receive an extra 3 bonus points on the final exam!** 
+
+#### Imputing Missing Values
+
+```{r}
+
+library(missForest)
+library(doParallel)
+
+data_clean <- data %>% 
+  rename(
+    FirstFlrSF = '1stFlrSF',
+    SecondFlrSF = '2ndFlrSF',
+    ThirdSsnPorch = '3SsnPorch'
+  )
+
+#chars to factors
+data_clean <- data_clean %>%
+  mutate_if(is.character, as.factor)
+
+#these look like factors
+data_clean <- data_clean %>% 
+  mutate(
+    OverallQual = as.factor(OverallQual),
+    OverallCond = as.factor(OverallCond), 
+    SalePrice = log(SalePrice)
+  )
+
+#these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
+#also let's remove the ID column
+excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
+
+data_clean <- data_clean %>% select(-all_of(excluded_columns))
+
+set.seed(100)
+
+num_cores <- detectCores() - 2
+
+#impute missing values
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+impute_vals <- missForest(data_clean, parallelize = 'variables')
+
+stopCluster(cl)
+
+data_all <- impute_vals$ximp
+
+
+
+
+```
+
+#### Simple Linear Regression Model 
+
+To find the best simple linear model, we loop through all the continuous variables and fit a model. To perhaps no surprise, the best model was GrLivArea. Since we already fit this model in analysis one, we moved to the next highest adj r2, which was GarageCars. This model had debatable diagnostic plots, so we moved to the next highest which was GarageArea. This model fits the diagnostic plots very well, except for 4 outliers where the garage size is abnormally large. Like GrlLivArea, we will suggest the use of this model in a range. In this instance, between 0 and 1250 sq ft.
+
+```{r}
+library(stringr)
+library(car)
+library(ggplot2)
+
+data_continuous <- data_all %>% select_if(is.numeric)
+
+response <- data_continuous$SalePrice
+predictors <- data_continuous %>% select(-all_of(c('SalePrice','GrLivArea', 'GarageCars')))
+
+
+formulas1 <- foreach(predictor = names(predictors)) %do%{
+  f <- str_glue("SalePrice~{predictor}")
+  as.formula(f)
+}
+
+formulas2 <- foreach(predictor = names(predictors)) %do%{
+  f <- str_glue("SalePrice~log({predictor} + .00001)")
+  as.formula(f)
+}
+
+formulas <- c(formulas1, formulas2)
+
+results <- foreach(formula = formulas) %do% {
+  m = lm(formula, data = data_all)
+  summary(m)
+}
+
+adj_r2 <- sapply(results, function(res) res$adj.r.squared)
+
+best_index <- which.max(adj_r2)
+
+f <- formulas[[best_index]]
+
+print(f)
+
+results[[best_index]]
+
+```
+
+Diagnostic Plots for GarageArea
+
+```{r}
+
+data_garage <- data_all %>% select(SalePrice, GarageArea)
+
+ggplot(data_garage, aes(x=GarageArea, y=SalePrice)) + geom_point() + geom_smooth(method = 'lm')
+
+m = lm(f, data = data_all)
+
+generate_diagnosticPlots(m)
+
+```
+
+#### Multiple Linear Regression - Feature Analysis/Selection
+
+MASS library can target AIC by doing stepwise feature selection. Using "Both" in this instance.
+
+```{r}
+
+library(MASS)
+
+model <- lm(SalePrice ~ ., data = data_all)
+set.seed(100)
+step_model <- stepAIC(model, direction = "both", trace = FALSE)
+
+```
+
+Looking for multi-collinearity with CAR package. Currently errors because we have perfect collinearity in the model. Will try to fix later.
+
+```{r}
+
+library(car)
+
+base_model <- lm(SalePrice ~., data = data_all)
+
+alias(SalePrice ~., data = data_all)
+
+cor(data_continuous)
+
+vifs <- vif(base_model)
+
+```
+
+Limited Leaps as a full run would take too long.
+
+```{r}
+
+library(leaps)
+
+fit <- regsubsets(SalePrice ~ ., data = data_all, nvmax = 5, nbest = 5, method = 'exhaustive')
+
+```
+
+Couldn't get this to run right. Maybe come back to it.
+
+```{r}
+
+library(leaps)
+library(doParallel)
+library(dplyr)
+
+response <- data_all$SalePrice
+predictors <- data_all %>% select(-all_of('SalePrice'))
+
+num_cores <- parallel::detectCores() - 2
+cl2 <- makeCluster(num_cores, outfile="log.txt")
+registerDoParallel(cl2)
+
+run_regsubsets <- function(group, r) {
+  regsubsets(x = predictor_group, y = r, nvmax = 1, method = "exhaustive")
+}
+
+
+indices <- rep(1:ceiling(length(names(predictors)) / num_cores), each = num_cores)[1:length(names(predictors))]
+groups <- split(names(predictors), indices)
+
+
+results <- foreach(group = groups, .packages = c("leaps",'dplyr'), .export = c('data_all', 'response', "run_regsubsets")) %do% {
+  predictor_group <- data_all %>% select(all_of(group))
+  summary(run_regsubsets(group, response))
+}
+
+mallows_cp_list <- lapply(results, function(res) res$cp)
+mallows_cp <- do.call(c, mallows_cp_list)
+
+# Identify the best predictor (minimum Cp)
+best_predictor_idx <- which.min(mallows_cp)
+best_predictor <- names(predictors)[best_predictor_idx]
+best_cp <- min(mallows_cp)
+
+# Output the best predictor and its Cp value
+best_model <- data.frame(
+  Predictor = best_predictor,
+  Cp = best_cp
+)
+
+print(best_model)
+
+# Stop parallel backend
+stopCluster(cl2)
+
 
 ```
