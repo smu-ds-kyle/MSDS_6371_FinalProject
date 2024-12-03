@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Helper Functions
+# Helper Functions
 
 ```{r}
 
@@ -39,6 +39,38 @@ hist(model$residuals,
 }
 
 
+generate_model_stats <- function(model){
+  
+terms <- all.vars(terms(model))
+
+data_M <- data_all %>% dplyr::select(all_of(terms))
+
+num_cores <- parallel::detectCores() - 2
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
+model <- train(SalePrice ~ ., data = data_M, method = "lm", trControl = ctrl)
+
+cv_predictions <- model$pred
+residuals <- cv_predictions$obs - cv_predictions$pred
+
+
+
+print(summary(model))
+print(model)
+
+aic <- AIC(model$finalModel)
+print(str_glue("AIC: {aic} \n"))
+
+bic_value <- BIC(model$finalModel)
+print(str_glue("BIC: {bic_value} \n"))
+
+pressStat <- sum(residuals^2)
+print(str_glue("PRESS: {pressStat} \n"))
+
+stopCluster(cl)
+}
 
 ```
 
@@ -89,6 +121,58 @@ gg_miss_var(missings)
 gg_miss_var(missings, show_pct = TRUE)
 
 ```
+
+## Imputing Missing Values
+
+It is given that missing values can be treat as missing at random. We will use the missForest package to impute missing values. This package uses a random forest algorithm to impute missing values.
+
+```{r}
+
+library(missForest)
+library(doParallel)
+
+data_clean <- data %>% 
+  rename(
+    FirstFlrSF = '1stFlrSF',
+    SecondFlrSF = '2ndFlrSF',
+    ThirdSsnPorch = '3SsnPorch'
+  )
+
+#chars to factors
+data_clean <- data_clean %>%
+  mutate_if(is.character, as.factor)
+
+#these look like factors
+data_clean <- data_clean %>% 
+  mutate(
+    OverallQual = as.factor(OverallQual),
+    OverallCond = as.factor(OverallCond),
+    MSSubClass = as.factor(MSSubClass),
+    SalePrice = log(SalePrice)
+  )
+
+#these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
+#also let's remove the ID column
+excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
+
+data_clean <- data_clean %>% select(-all_of(excluded_columns))
+
+set.seed(100)
+
+num_cores <- detectCores() - 2
+
+#impute missing values
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+impute_vals <- missForest(data_clean, parallelize = 'variables')
+
+stopCluster(cl)
+
+data_all <- impute_vals$ximp
+
+```
+
 
 ## ANALYSIS 1:
 
@@ -388,56 +472,6 @@ generate_diagnosticPlots(m4)
 
 **Build the most predictive model for sales prices of homes in all of Ames, Iowa.  This includes all neighborhoods. Your group is limited to only the techniques we have learned in 6371 (no random forests or other methods we have not yet covered).  Specifically, you should produce at least 2 competing models: a simple linear regression model (you pick the explanatory variable) and a multiple linear regression model (SalePrice\~GrLivArea + FullBath) and at least one additional multiple linear regression model where you select the explanatory variables.  Generate an adjusted R^2^, CV Press and Kaggle Score for each of these models and clearly describe which model you feel is the best in terms of being able to predict future sale prices of homes in Ames, Iowa.  In your paper, please include a table similar to the one below.  The group with the lowest public Kaggle score will receive an extra 3 bonus points on the final exam!** 
 
-#### Imputing Missing Values
-
-```{r}
-
-library(missForest)
-library(doParallel)
-
-data_clean <- data %>% 
-  rename(
-    FirstFlrSF = '1stFlrSF',
-    SecondFlrSF = '2ndFlrSF',
-    ThirdSsnPorch = '3SsnPorch'
-  )
-
-#chars to factors
-data_clean <- data_clean %>%
-  mutate_if(is.character, as.factor)
-
-#these look like factors
-data_clean <- data_clean %>% 
-  mutate(
-    OverallQual = as.factor(OverallQual),
-    OverallCond = as.factor(OverallCond), 
-    SalePrice = log(SalePrice)
-  )
-
-#these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
-#also let's remove the ID column
-excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
-
-data_clean <- data_clean %>% select(-all_of(excluded_columns))
-
-set.seed(100)
-
-num_cores <- detectCores() - 2
-
-#impute missing values
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
-
-impute_vals <- missForest(data_clean, parallelize = 'variables')
-
-stopCluster(cl)
-
-data_all <- impute_vals$ximp
-
-
-
-
-```
 
 #### Simple Linear Regression Model
 
@@ -497,6 +531,8 @@ generate_diagnosticPlots(m)
 
 ```
 
+##### M1
+
 Model Statistics and Predictions
 
 ```{r}
@@ -504,28 +540,11 @@ Model Statistics and Predictions
 library(caret)
 library(doParallel)
 
-num_cores <- parallel::detectCores() - 2
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
+M <- lm(SalePrice ~ GarageArea, data = data_all)
 
-ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
-model <- train(SalePrice ~ GarageArea, data = data_all, method = "lm", trControl = ctrl)
+generate_diagnosticPlots(M)
 
-cv_predictions <- model$pred
-residuals <- cv_predictions$obs - cv_predictions$pred
-
-pressStat <- sum(residuals^2)
-
-summary(model)
-print(model)
-
-aic <- AIC(model$finalModel)
-str_glue("AIC: {aic} \n")
-
-bic_value <- BIC(final_model)
-str_glue("BIC: {bic_value} \n")
-
-stopCluster(cl)
+generate_model_stats(M)
 
 ```
 
@@ -568,27 +587,6 @@ print(vifs)
 # print(grlivarea_cor_sorted)
 ```
 
-After removing perfect collinearity, vif() was able to run. Some research seems to suggest that a VIF of greater than 5 show's high correlation to other variables in the mode. I suspect that garagecars and garagearea are related, so let's try removing one of those and checking vif again.
-
-```{r}
-
-library(car)
-
-data_continuous <- data_all %>% select_if(is.numeric)
-
-col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF', 'GarageArea')
-data_continuous_clean_t1 <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
-base_model_clean_t1<- lm(SalePrice ~., data = data_continuous_clean_t1)
-vifs_t1 <- vif(base_model_clean_t1) 
-print(vifs_t1)
-
-
-col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF', 'GarageArea', 'GrLivArea')
-data_continuous_clean_t2 <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
-base_model_clean_t2<- lm(SalePrice ~., data = data_continuous_clean_t2)
-vifs_t2 <- vif(base_model_clean_t2) 
-print(vifs_t2)
-```
 
 ##### Categorical Variable Analysis
 
@@ -667,49 +665,56 @@ print(best_bic_model)
 #plot(fit, scale = "adjr2", main = "Adjusted R-squared")
 ```
 
-Let's take the continuous columns we found in the VIF analysis and then the most significant categorical variables we found. Perhaps we can use LEAPS on this smaller set of options. If not exhaustive, we can do step-wise forward, backward, and both.
+
+After removing perfect collinearity, vif() was able to run. Some research seems to suggest that a VIF of greater than 5 show's high correlation to other variables in the mode. I suspect that garagecars and garagearea are related, so let's try removing one of those and checking vif again.
+
+Let's take the continuous columns we found in the VIF analysis and then the most significant categorical variables we found. Can't use leaps on catagorical vars, so trying olsrr.
 
 ```{r}
 
-library(leaps)
+library(olsrr)
 library(dplyr)
+library(car)
+
+data_continuous <- data_all %>% select_if(is.numeric)
+
+col_to_remove <- c('FirstFlrSF','SecondFlrSF','LowQualFinSF','BsmtFinSF1','BsmtFinSF2', 'BsmtUnfSF', 'GarageArea')
+data_continuous_clean_t1 <- data_continuous %>% dplyr::select(-all_of(col_to_remove))
+base_model_clean_t1<- lm(SalePrice ~., data = data_continuous_clean_t1)
+vifs_t1 <- vif(base_model_clean_t1) 
+print(vifs_t1)
 
 sig_cata <- c('Neighborhood', 'ExterQual', 'KitchenQual', 'Foundation', 'GarageFinish', 'BsmtQual', 'OverallQual', 'GarageType')
 
 continuous_cols <- data_all %>% select(all_of(names(vifs_t1)))
 cata_cols <- data_all %>% select(all_of(sig_cata))
 
-candidate_data <- cbind(continuous_cols, cata_cols)
+candidate_data <- cbind(continuous_cols, cata_cols, SalePrice = data_all$SalePrice)
 
-model_mat <- model.matrix(~ ., data = candidate_data)[, -1]
+#model_mat <- model.matrix(~ ., data = candidate_data)[, -1]
 
-set.seed(100)
-fit_forward <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 20, nbest = 5, method = 'forward')
-
-set.seed(100)
-fit_backward <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 36, nbest = 5, method = 'backward')
+model <- lm(SalePrice ~ ., data = candidate_data)
 
 set.seed(100)
-fit_both <- regsubsets(x = candidate_data, y = data_all$SalePrice, data = candidate_data, nvmax = 36, nbest = 5, method = 'seqrep')
+fit_forward <- ols_step_forward_adj_r2(model)
 
-fit_sum <- summary(fit_forward)
+set.seed(100)
+fit_backward <- ols_step_backward_adj_r2(model)
 
+set.seed(100)
+fit_both <- ols_step_both_adj_r2(model)
 
-# 
-# # Identify the best models according to different metrics
-# best_adjr2_index <- which.max(fit_sum$adjr2)
-# best_cp_index <- which.min(fit_sum$cp)
-# best_bic_index <- which.min(fit_sum$bic)
-# 
-# # Extract coefficients
-# best_adjr2_model <- coef(fit, id = best_adjr2_index)
-# best_cp_model <- coef(fit, id = best_cp_index)
-# best_bic_model <- coef(fit, id = best_bic_index)
-# 
-# print(best_adjr2_model)
-# print(best_cp_model)
-# print(best_bic_model)
+set.seed(100)
+fit_heir <- ols_step_both_p(model, .05, heirarchical = TRUE)
 
+plot(fit_forward)
+plot(fit_backward)
+plot(fit_both)
+plot(fit_heir)
+
+saveRDS(fit_forward, 'models/forward_fit.rds')
+saveRDS(fit_both, 'models/fit_both.rds')
+saveRDS(fit_heir, 'models/fit_heir.rds')
 
 ```
 
@@ -757,47 +762,128 @@ print(lasso_coefficients)
 
 #### Multiple Linear Regression - Models
 
-M1 - Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
+##### M1
+
+Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
 
 ```{r}
 
 library(caret)
 library(doParallel)
 
-M1 <- readRDS('models/potential_model_1.rds')
-generate_diagnosticPlots(M1)
+M <- readRDS('models/potential_model_1.rds')
 
-terms <- all.vars(terms(M1))
+generate_diagnosticPlots(M)
 
-data_M1 <- data_all %>% dplyr::select(all_of(terms))
-
-num_cores <- parallel::detectCores() - 2
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
-
-ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
-model <- train(SalePrice ~ ., data = data_M1, method = "lm", trControl = ctrl)
-
-cv_predictions <- model$pred
-residuals <- cv_predictions$obs - cv_predictions$pred
-
-pressStat <- sum(residuals^2)
-
-summary(model)
-print(model)
-
-aic <- AIC(model$finalModel)
-str_glue("AIC: {aic} \n")
-
-bic_value <- BIC(final_model)
-str_glue("BIC: {bic_value} \n")
-
-stopCluster(cl)
+generate_model_stats(M)
 
 
 ```
 
-#### TBD SECTION
+
+##### M2
+
+Found by olsrr package, targeting adjr2 with forward selection on subjectively selected data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/forward_fit.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+##### M3
+
+Found by olsrr package, targeting adjr2 with both selection on subjectively selected data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/fit_both.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+##### M4
+
+Found by olsrr package, targeting adjr2 with both heir selection on subjectively selected data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/fit_heir.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+##### M5
+
+Found by olsrr package, targeting adjr2 with forward selection on all the data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/forward_fit_all.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+##### M6
+
+Found by olsrr package, targeting adjr2 with both selection on all the data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/fit_both_all.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+##### M7
+
+Found by olsrr package, targeting adjr2 with both heir selection on all the data
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- readRDS('models/fit_heir_all.rds')
+
+generate_diagnosticPlots(M$model)
+
+generate_model_stats(M$model)
+
+```
+
+#### NOT WORKING CODE
 
 Couldn't get this to run right. Maybe come back to it.
 
