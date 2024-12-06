@@ -13,6 +13,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
+library(car)
+library(stringr)
+library(doParallel)
+library(caret)
+
 generate_diagnosticPlots <- function(model){
   
 par(mfrow = c(2, 2))  # Arrange plots in a 2x2 grid
@@ -39,22 +44,56 @@ hist(model$residuals,
 }
 
 
-generate_model_stats <- function(model){
+generate_model_stats <- function(model, data_set){
   
 terms <- all.vars(terms(model))
 
-data_M <- data_all %>% dplyr::select(all_of(terms))
+data_M <- data_set %>% dplyr::select(all_of(terms))
 
 num_cores <- parallel::detectCores() - 2
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
-model <- train(SalePrice ~ ., data = data_M, method = "lm", trControl = ctrl)
+model <- train(SalePriceLog ~ ., data = data_M, method = "lm", trControl = ctrl)
 
 cv_predictions <- model$pred
 residuals <- cv_predictions$obs - cv_predictions$pred
 
+
+print(summary(model))
+print(model)
+
+aic <- AIC(model$finalModel)
+print(str_glue("AIC: {aic} \n"))
+
+bic_value <- BIC(model$finalModel)
+print(str_glue("BIC: {bic_value} \n"))
+
+pressStat <- sum(residuals^2)
+print(str_glue("PRESS: {pressStat} \n"))
+
+stopCluster(cl)
+
+return(model)
+}
+
+
+generate_model_normalize_stats <- function(model, data_set){
+  
+terms <- all.vars(terms(model))
+
+data_M <- data_set %>% dplyr::select(all_of(terms))
+
+num_cores <- parallel::detectCores() - 2
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
+model <- train(SalePrice ~ ., data = data_M, method = "lm", trControl = ctrl, preProcess = c("center", "scale"))
+
+cv_predictions <- model$pred
+residuals <- cv_predictions$obs - cv_predictions$pred
 
 
 print(summary(model))
@@ -72,6 +111,57 @@ print(str_glue("PRESS: {pressStat} \n"))
 stopCluster(cl)
 }
 
+clean_and_process_data <- function(df){
+  
+  data_clean <- df %>% 
+  rename(
+    FirstFlrSF = '1stFlrSF',
+    SecondFlrSF = '2ndFlrSF',
+    ThirdSsnPorch = '3SsnPorch'
+  )
+
+#these look like factors
+data_clean <- data_clean %>% 
+  mutate(
+    OverallQual = as.factor(OverallQual),
+    OverallCond = as.factor(OverallCond),
+    MSSubClass = as.factor(MSSubClass),
+    SalePrice = log(SalePrice),
+    PoolQC = ifelse(is.na(PoolQC), 'None', PoolQC),
+    MiscFeature = ifelse(is.na(MiscFeature), 'None', MiscFeature),
+    Alley = ifelse(is.na(Alley), 'None', Alley),
+    Fence = ifelse(is.na(Fence), 'None', Fence),
+    FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu),
+    GarageYrBlt = ifelse(is.na(GarageYrBlt) & is.na(GarageType), 0, GarageYrBlt),
+    GarageType = ifelse(is.na(GarageType), 'None', GarageType),
+    GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish),
+    GarageQual = ifelse(is.na(GarageQual), 'None', GarageQual),
+    GarageCond = ifelse(is.na(GarageCond), 'None', GarageCond),
+    BsmtQual = ifelse(is.na(BsmtQual), 'None', BsmtQual),
+    BsmtCond = ifelse(is.na(BsmtCond), 'None', BsmtCond),
+    BsmtExposure = ifelse(is.na(BsmtExposure), 'None', BsmtExposure),
+    BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2),
+    BsmtFinType1 = ifelse(is.na(BsmtFinType1), 'None', BsmtFinType1),
+    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
+  )
+
+data_clean <- data_clean %>% 
+  mutate(
+    HasGarage = ifelse(GarageType == 'None', 'No', 'Yes'),
+    HasBsmt = ifelse(BsmtQual == 'None', 'No', 'Yes'),
+    HasFence = ifelse(Fence == 'None', 'No', 'Yes'),
+    HasPool = ifelse(PoolQC == 'None', 'No', 'Yes'),
+    HasMiscFeature = ifelse(MiscFeature == 'None', 'No', 'Yes'),
+    HasAlley = ifelse(Alley == 'None', 'No', 'Yes'),
+    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes')
+  )
+  
+  
+  return(data_clean)
+}
+
+
+
 ```
 
 ## General EDA
@@ -84,6 +174,8 @@ library(data.table)
 library(dplyr)
 
 data = fread('data/train.csv')
+
+testData <- fread('data/test.csv')
 
 ```
 
@@ -122,14 +214,11 @@ gg_miss_var(missings, show_pct = TRUE)
 
 ```
 
-## Imputing Missing Values
-
-It is given that missing values can be treat as missing at random. We will use the missForest package to impute missing values. This package uses a random forest algorithm to impute missing values.
+### Fixing "Missing" but really missing data, and fix types
 
 ```{r}
 
-library(missForest)
-library(doParallel)
+library(bestNormalize)
 
 data_clean <- data %>% 
   rename(
@@ -138,24 +227,77 @@ data_clean <- data %>%
     ThirdSsnPorch = '3SsnPorch'
   )
 
-#chars to factors
-data_clean <- data_clean %>%
-  mutate_if(is.character, as.factor)
-
 #these look like factors
 data_clean <- data_clean %>% 
   mutate(
     OverallQual = as.factor(OverallQual),
     OverallCond = as.factor(OverallCond),
     MSSubClass = as.factor(MSSubClass),
-    SalePrice = log(SalePrice)
+    SalePrice = SalePrice,
+    SalePriceLog = log(SalePrice),
+    PoolQC = ifelse(is.na(PoolQC), 'None', PoolQC),
+    MiscFeature = ifelse(is.na(MiscFeature), 'None', MiscFeature),
+    Alley = ifelse(is.na(Alley), 'None', Alley),
+    Fence = ifelse(is.na(Fence), 'None', Fence),
+    FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu),
+    GarageYrBlt = ifelse(is.na(GarageYrBlt) & is.na(GarageType), 0, GarageYrBlt),
+    GarageType = ifelse(is.na(GarageType), 'None', GarageType),
+    GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish),
+    GarageQual = ifelse(is.na(GarageQual), 'None', GarageQual),
+    GarageCond = ifelse(is.na(GarageCond), 'None', GarageCond),
+    BsmtQual = ifelse(is.na(BsmtQual), 'None', BsmtQual),
+    BsmtCond = ifelse(is.na(BsmtCond), 'None', BsmtCond),
+    BsmtExposure = ifelse(is.na(BsmtExposure), 'None', BsmtExposure),
+    BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2),
+    BsmtFinType1 = ifelse(is.na(BsmtFinType1), 'None', BsmtFinType1),
+    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
   )
+
+data_clean <- data_clean %>% 
+  mutate(
+    HasGarage = ifelse(GarageType == 'None', 'No', 'Yes'),
+    HasBsmt = ifelse(BsmtQual == 'None', 'No', 'Yes'),
+    HasFence = ifelse(Fence == 'None', 'No', 'Yes'),
+    HasPool = ifelse(PoolQC == 'None', 'No', 'Yes'),
+    HasMiscFeature = ifelse(MiscFeature == 'None', 'No', 'Yes'),
+    HasAlley = ifelse(Alley == 'None', 'No', 'Yes'),
+    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes'),
+    HasSecondFloor = ifelse(SecondFlrSF == 0, 'No', 'Yes'),
+    HasVnr = ifelse(MasVnrType == 'None', 'No', 'Yes')
+    
+  )
+
+#chars to factors
+data_clean <- data_clean %>%
+  mutate_if(is.character, as.factor)
+
+
+
+```
+### Imputing Missing Values
+
+It is given that missing values can be treat as missing at random. We will use the missForest package to impute missing values. This package uses a random forest algorithm to impute missing values.
+
+```{r}
+
+library(missForest)
+library(doParallel)
+library(naniar)
+
+
+
+
+missings <- data_clean %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
 
 #these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
 #also let's remove the ID column
-excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
+#excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
 
-data_clean <- data_clean %>% select(-all_of(excluded_columns))
+#data_clean <- data_clean %>% select(-all_of(excluded_columns))
 
 set.seed(100)
 
@@ -173,6 +315,130 @@ data_all <- impute_vals$ximp
 
 ```
 
+### Transformations
+
+```{r}
+
+library(bestNormalize)
+library(dplyr)
+
+
+data_all <- data_all %>%
+  mutate(
+
+  across(
+    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+    ~ log1p(.),
+    .names = "{.col}_LOG" # Append "Log" to the column name
+  )
+  )
+
+data_all <- data_all %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
+```
+
+### Visual Plots
+
+Look at plots of all vars by the SalesPrice
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(DataExplorer)
+
+#plot_correlation(data_clean)
+
+#plot_boxplot(data_clean %>% select(-Id), by = "SalePrice", ncol = 1, nrow = 1, geom_boxplot_args = list(outlier.colour = "red", outlier.shape = 1))
+
+
+# Assuming your dataset is `data` and response variable is `response`
+numeric_vars <- data_all %>%
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::select(-SalePrice, -Id, -SalePriceLog) # Exclude the response variable from predictors
+
+# Create scatter plots for numeric predictors
+for (var in names(numeric_vars)) {
+  p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog")) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    labs(title = paste("Scatter Plot of", var, "vs SalePriceLog"),
+         x = var, y = "SalePriceLog") +
+    theme_minimal()
+  
+  # p2 <- ggplot(data_clean, aes_string(x = var, y = "SalePrice")) +
+  #   geom_boxplot(outliers = TRUE, outlier.colour = "RED", outlier.shape = 2) +
+  #   labs(title = paste("Scatter Plot of", var, "vs Response"),
+  #        x = var, y = "Response") +
+  #   theme_minimal()
+  # 
+  # print(p2)
+  print(p)
+}
+
+catagorical_vars <- data_all %>%
+  dplyr::select(where(is.factor))
+                
+for (var in names(catagorical_vars)) {
+  
+   p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog")) +
+    geom_boxplot(outliers = TRUE, outlier.colour = "RED", outlier.shape = 2) +
+    labs(title = paste("Box Plot of", var, "vs SalePriceLog"),
+         x = var, y = "SalePriceLog") +
+    theme_minimal()
+  
+  print(p)
+}
+
+
+
+```
+
+
+### Thoughts on variables
+
+From a visual analysis, it looks to me that the following variables are likely to be important in predicting the SalePrice of a house:
+
+#### Continuous Variables
+
+- GrLivArea
+- GarageArea
+- LotArea
+- MasVnrArea
+- SecondFlrSF
+- TotalBsmtSF
+- TotalRmsAbvGrd
+- Year Built
+- YearRemodalAdd
+
+#### Categorical Variables
+
+- HasGarage
+- HasFirePlace
+- HasVnr
+- HasSecondFlr
+- HasBsmt
+- BsmtCondition
+- HasPool
+- PoolQC
+- MassVnType
+- Neighborhood
+- OverallCondition
+- OverallQuality
+- Street
+
+#### Potential 2-way Interactions
+
+- GrLivArea:Neighborhood
+- HasPool:PoolQC
+- HasGarage:GarageArea
+- HasVnr:MasVnrArea
+- HasBsmt:TotalBsmtSF
+- HasSecondFlr:SecondFlrSF
+
+#### Potential 3-way Interactions
+
+- HasVnr:MasVnrArea:MassVnType
+- HasBsmt:TotalBsmtSF:BsmtCondition
 
 ## ANALYSIS 1:
 
@@ -275,12 +541,12 @@ str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
 ```
 
+#### Log-Linear. - USING THIS ONE
+
 Let's take a closer look at the outiers in the Edwards Neighborhood. Properties with ID'S 1299 and 524 are much larger than all the others in the neighborhood, by at least 2x. Unlikely that this is a data recording error, but possible. By removing these two data points, increase the adjusted R2 of our best model (M4) by 8%. In keeping with "all models are wrong but some are useful", it may be presenting this "wrong" model to the company with the caveat that it should only be used with houses 3000 sq ft or below. Very likely the improvement in accuracy is worth this trade off as there does large houses seem to be very rare. This sample suggests 2 out of \~380.
 
 ```{r}
 
-data_edwards <- data %>% filter(Neighborhood == "Edwards") %>%  select(order(colnames(.)))
-#View(data_edwards)
 
 data_filtered <- data %>% 
   dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
@@ -340,14 +606,20 @@ str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
 str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
 generate_diagnosticPlots(m4)
+
+generate_model_stats(m4, data_filtered)
 ```
+
+#### Log-Log
 
 For completeness sake, we can log transform the GrLivArea. This transformation results in the same best model of M4, with practically the same adjusted R2 of .52. In keeping with the idea of parsimony, the easy of interpretation with the log-linear model without outliers, may be more practical than this log-log model with those outliers included.
 
 ```{r}
 
+library(ggplot2)
+
 data_filtered <- data %>% 
-  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide')) %>% 
+  dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
   dplyr::select(SalePrice, GrLivArea, Neighborhood, Id) %>% 
   dplyr::mutate(
     Neighborhood = as.factor(Neighborhood),
@@ -384,6 +656,10 @@ s4 = summary(m4)
 m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
 s5 = summary(m5)
 
+#GrLiveArea and Neighborhood effect + Interaction
+m6 = lm(SalePrice ~ GrLivArea * Neighborhood, data = data_filtered)
+s6 = summary(m6)
+
 
 str_glue("M0 - Adjusted R2: {s0$adj.r.squared}")
 str_glue("M1 - Adjusted R2: {s1$adj.r.squared}")
@@ -404,8 +680,12 @@ str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
 str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
 str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
-generate_diagnosticPlots(m4)
+generate_diagnosticPlots(m6)
+
+generate_model_stats(m6, data_filtered)
 ```
+
+#### Linear 
 
 Often common to jump to log of money data, but let's check the linear model with no transformations. We can see from the diagnostic plots, that we there is evidence of moderate increasing variance as well as a right skewed histogram of the residuals. These problems are improved upon when the log of the sales price is used.
 
@@ -466,6 +746,7 @@ str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
 generate_diagnosticPlots(m4)
 
+generate_model_stats(m4, data_filtered)
 ```
 
 ## ANALYSIS 2
@@ -531,7 +812,7 @@ generate_diagnosticPlots(m)
 
 ```
 
-##### M1
+##### M1. - USE THIS ONE
 
 Model Statistics and Predictions
 
@@ -544,7 +825,7 @@ M <- lm(SalePrice ~ GarageArea, data = data_all)
 
 generate_diagnosticPlots(M)
 
-generate_model_stats(M)
+generate_model_stats(M, data_all)
 
 ```
 
@@ -707,14 +988,30 @@ fit_both <- ols_step_both_adj_r2(model)
 set.seed(100)
 fit_heir <- ols_step_both_p(model, .05, heirarchical = TRUE)
 
-plot(fit_forward)
-plot(fit_backward)
-plot(fit_both)
-plot(fit_heir)
-
 saveRDS(fit_forward, 'models/forward_fit.rds')
 saveRDS(fit_both, 'models/fit_both.rds')
 saveRDS(fit_heir, 'models/fit_heir.rds')
+
+
+# model <- lm(SalePrice ~ ., data = data_all)
+# 
+# set.seed(100)
+# fit_forward <- ols_step_forward_adj_r2(model)
+# 
+# set.seed(100)
+# fit_backward <- ols_step_backward_adj_r2(model)
+# 
+# set.seed(100)
+# fit_both <- ols_step_both_adj_r2(model)
+# 
+# set.seed(100)
+# fit_heir <- ols_step_both_p(model, .05, heirarchical = TRUE)
+# 
+# saveRDS(fit_forward, 'models/forward_fit_all.rds')
+# saveRDS(fit_both, 'models/fit_both_all.rds')
+# saveRDS(fit_heir, 'models/fit_heir_all.rds')
+
+
 
 ```
 
@@ -762,6 +1059,26 @@ print(lasso_coefficients)
 
 #### Multiple Linear Regression - Models
 
+##### M0 - USE THIS ONE - MANDATORY?
+
+```{r}
+
+library(caret)
+library(doParallel)
+
+M <- lm(SalePrice ~ GrLivArea + FullBath, data = data_all)
+
+generate_diagnosticPlots(M)
+
+generate_model_stats(M, data_all)
+
+print('scaled version')
+
+generate_model_normalize_stats(M, data_all)
+
+
+```
+
 ##### M1
 
 Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
@@ -775,7 +1092,7 @@ M <- readRDS('models/potential_model_1.rds')
 
 generate_diagnosticPlots(M)
 
-generate_model_stats(M)
+generate_model_stats(M, data_all)
 
 
 ```
@@ -794,7 +1111,11 @@ M <- readRDS('models/forward_fit.rds')
 
 generate_diagnosticPlots(M$model)
 
-generate_model_stats(M$model)
+m <- generate_model_stats(M$model, data_all)
+
+test <- clean_and_process_data(testData)
+
+predictions <- predict(m, newdata = testData)
 
 ```
 
@@ -811,7 +1132,7 @@ M <- readRDS('models/fit_both.rds')
 
 generate_diagnosticPlots(M$model)
 
-generate_model_stats(M$model)
+generate_model_stats(M$model, data_all)
 
 ```
 
@@ -828,60 +1149,122 @@ M <- readRDS('models/fit_heir.rds')
 
 generate_diagnosticPlots(M$model)
 
-generate_model_stats(M$model)
+generate_model_stats(M$model, data_all)
 
+names(data_all)
 ```
 
-##### M5
+##### M5 
 
-Found by olsrr package, targeting adjr2 with forward selection on all the data
+Let's look at the variables that we found in the visual analysis. 
+
 
 ```{r}
 
 library(caret)
-library(doParallel)
+library(parallel)
+library(olsrr)
 
-M <- readRDS('models/forward_fit_all.rds')
 
-generate_diagnosticPlots(M$model)
 
-generate_model_stats(M$model)
 
+model1 <- lm(SalePriceLog ~ 
+              GrLivArea + GarageArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
+              HasGarage + HasFireplace + HasVnr + HasSecondFloor + HasBsmt + BsmtCond + HasPool + PoolQC + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
+              GrLivArea:Neighborhood + HasPool:PoolQC + HasGarage:GarageArea + HasVnr:MasVnrArea + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF +
+              HasVnr:MasVnrArea:MasVnrType + HasBsmt:TotalBsmtSF:BsmtCond
+              , data = data_all)
+
+ols_plot_cooksd_chart(model)
+ols_plot_cooksd_bar(model)
+ols_plot_dffits(model)
+ols_plot_resid_lev(model)
+
+generate_model_stats(model, data_all)
+
+
+data_all_minus_outliers <- data_all %>% filter(!(Id %in% c(1299, 1424, 235, 530, 523)))
+
+model2 <- lm(SalePriceLog ~ 
+              GrLivArea + GarageArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
+              HasGarage + HasFireplace + HasVnr + HasSecondFloor + HasBsmt + BsmtCond + HasPool + PoolQC + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
+              GrLivArea:Neighborhood + HasPool:PoolQC + HasGarage:GarageArea + HasVnr:MasVnrArea + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF +
+              HasVnr:MasVnrArea:MasVnrType + HasBsmt:TotalBsmtSF:BsmtCond
+              , data = data_all_minus_outliers)
+
+ols_plot_cooksd_chart(model)
+ols_plot_cooksd_bar(model)
+ols_plot_dffits(model)
+ols_plot_resid_lev(model)
+
+generate_model_stats(model, data_all_minus_outliers)
+
+ols_correlations(model1)
 ```
-
-##### M6
-
-Found by olsrr package, targeting adjr2 with both selection on all the data
+Distributed Metric Checking? Just generating the list of all formulares takes forever... maybe easier to do on the wine data set? 
 
 ```{r}
+library(combinat)
+library(tidyverse)
+library(Metrics)
 
-library(caret)
-library(doParallel)
+# Function to compute metrics for a given formula
+evaluate_model <- function(formula, data) {
+  model <- lm(as.formula(formula), data = data)
+  predictions <- predict(model, data)
+  
+  # Calculate metrics
+  mae <- mae(data$SalePriceLog, predictions)
+  rmse <- rmse(data$SalePriceLog, predictions)
+  adj_r2 <- summary(model)$adj.r.squared
+  aic <- AIC(model)
+  bic <- BIC(model)
+  mape <- mean(abs((data$SalePriceLog - predictions) / data$SalePriceLog)) * 100
+  mallows_cp <- sum(residuals(model)^2) / (summary(model)$sigma^2) - (2 * (length(model$coefficients) - 1))
+  
+  return(data.frame(
+    Formula = formula,
+    Adj_R2 = adj_r2,
+    MAE = mae,
+    RMSE = rmse,
+    AIC = aic,
+    BIC = bic,
+    MAPE = mape,
+    Mallows_CP = mallows_cp
+  ))
+}
 
-M <- readRDS('models/fit_both_all.rds')
+predictors <- c("GrLivArea", "GarageArea", "LotArea", "MasVnrArea", "SecondFlrSF", 
+                "TotalBsmtSF", "TotRmsAbvGrd", "YearBuilt", "YearRemodAdd",
+                "HasGarage", "HasFireplace", "HasVnr", "HasSecondFloor", 
+                "HasBsmt", "BsmtCond", "HasPool", "PoolQC", "MasVnrType", 
+                "Neighborhood", "OverallCond", "OverallQual", "Street", 
+                "GrLivArea:Neighborhood", "HasPool:PoolQC", "HasGarage:GarageArea", 
+                "HasVnr:MasVnrArea", "HasBsmt:TotalBsmtSF", "HasSecondFloor:SecondFlrSF",
+                "HasVnr:MasVnrArea:MasVnrType", "HasBsmt:TotalBsmtSF:BsmtCond")
 
-generate_diagnosticPlots(M$model)
+# Generate all combinations of predictors
+formulas <- lapply(1:length(predictors), function(k) {
+  combn(predictors, k, simplify = FALSE) %>%
+    map(~ paste("SalePriceLog ~", paste(., collapse = " + ")))
+}) %>%
+  flatten() # Flatten list of lists
 
-generate_model_stats(M$model)
 
 ```
 
-##### M7
 
-Found by olsrr package, targeting adjr2 with both heir selection on all the data
+#### Experimental stuff
 
 ```{r}
+library(olsrr)
 
-library(caret)
-library(doParallel)
+M <- readRDS('models/forward_fit.rds')
 
-M <- readRDS('models/fit_heir_all.rds')
-
-generate_diagnosticPlots(M$model)
-
-generate_model_stats(M$model)
+ols_plot_added_variable(M$model)
 
 ```
+
 
 #### NOT WORKING CODE
 
