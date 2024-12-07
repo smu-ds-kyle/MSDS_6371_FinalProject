@@ -17,6 +17,9 @@ library(car)
 library(stringr)
 library(doParallel)
 library(caret)
+library(olsrr)
+library(bestNormalize)
+library(naniar)
 
 generate_diagnosticPlots <- function(model){
   
@@ -41,18 +44,23 @@ hist(model$residuals,
      xlab = "Residuals",
      main = "Histogram of Residuals",
      col = "lightblue")
+
+ols_plot_cooksd_chart(model)
+ols_plot_cooksd_bar(model)
+ols_plot_dffits(model)
+ols_plot_resid_lev(model)
 }
 
 
 generate_model_stats <- function(model, data_set){
 
-model <- model_custom  
-data_set <- data_testing    
-colSums(is.na(data_M))
+#model <- model_custom  
+#data_set <- data_testing    
+#colSums(is.na(data_M))
 
 terms <- all.vars(terms(model))
 
-data_M <- data_set %>% dplyr::select(all_of(terms))
+data_M <- data_set %>% dplyr::select(all_of(terms), 'SalePriceLog')
 
 num_cores <- parallel::detectCores() - 2
 cl <- makeCluster(num_cores)
@@ -82,42 +90,11 @@ stopCluster(cl)
 return(model)
 }
 
-
-generate_model_normalize_stats <- function(model, data_set){
+preprocess_data <- function(data_t){
   
-terms <- all.vars(terms(model))
-
-data_M <- data_set %>% dplyr::select(all_of(terms))
-
-num_cores <- parallel::detectCores() - 2
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
-
-ctrl <- trainControl(method = "LOOCV", allowParallel = TRUE, savePredictions = "all")
-model <- train(SalePrice ~ ., data = data_M, method = "lm", trControl = ctrl, preProcess = c("center", "scale"))
-
-cv_predictions <- model$pred
-residuals <- cv_predictions$obs - cv_predictions$pred
-
-
-print(summary(model))
-print(model)
-
-aic <- AIC(model$finalModel)
-print(str_glue("AIC: {aic} \n"))
-
-bic_value <- BIC(model$finalModel)
-print(str_glue("BIC: {bic_value} \n"))
-
-pressStat <- sum(residuals^2)
-print(str_glue("PRESS: {pressStat} \n"))
-
-stopCluster(cl)
-}
-
-clean_and_process_data <- function(df){
+  #data_t = testData
   
-  data_clean <- df %>% 
+  data_clean <- data_t %>% 
   rename(
     FirstFlrSF = '1stFlrSF',
     SecondFlrSF = '2ndFlrSF',
@@ -130,12 +107,12 @@ data_clean <- data_clean %>%
     OverallQual = as.factor(OverallQual),
     OverallCond = as.factor(OverallCond),
     MSSubClass = as.factor(MSSubClass),
-    SalePrice = log(SalePrice),
     PoolQC = ifelse(is.na(PoolQC), 'None', PoolQC),
     MiscFeature = ifelse(is.na(MiscFeature), 'None', MiscFeature),
     Alley = ifelse(is.na(Alley), 'None', Alley),
     Fence = ifelse(is.na(Fence), 'None', Fence),
     FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu),
+    GarageArea = ifelse(is.na(GarageArea), 0, GarageArea),
     GarageYrBlt = ifelse(is.na(GarageYrBlt) & is.na(GarageType), 0, GarageYrBlt),
     GarageType = ifelse(is.na(GarageType), 'None', GarageType),
     GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish),
@@ -149,6 +126,29 @@ data_clean <- data_clean %>%
     MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
   )
 
+#impute lot frontage with the median lotfrantage by neighborhood
+data_clean <- data_clean %>%
+  group_by(Neighborhood) %>%
+  mutate(LotFrontage = ifelse(is.na(LotFrontage), median(LotFrontage, na.rm = TRUE), LotFrontage)) %>%
+  ungroup() 
+
+#assuming masvnrarea na means no masonry veneer
+data_clean <- data_clean %>% 
+  mutate(
+    MasVnrArea = ifelse(is.na(MasVnrArea), 0, MasVnrArea),
+    MasVnrType = ifelse(is.na(MasVnrType), 'None', MasVnrType)
+  )
+
+
+
+
+missings <- data_clean %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+
 data_clean <- data_clean %>% 
   mutate(
     HasGarage = ifelse(GarageType == 'None', 'No', 'Yes'),
@@ -157,13 +157,59 @@ data_clean <- data_clean %>%
     HasPool = ifelse(PoolQC == 'None', 'No', 'Yes'),
     HasMiscFeature = ifelse(MiscFeature == 'None', 'No', 'Yes'),
     HasAlley = ifelse(Alley == 'None', 'No', 'Yes'),
-    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes')
+    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes'),
+    HasSecondFloor = ifelse(SecondFlrSF == 0, 'No', 'Yes'),
+    HasVnr = ifelse(MasVnrType == 'None' & MasVnrArea == 0, 'No', 'Yes')
+    
   )
-  
-  
-  return(data_clean)
+
+#chars to factors
+data_clean <- data_clean %>%
+  mutate_if(is.character, as.factor)
+
+
+missings <- data_clean %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+data_clean <- data_clean %>%
+  mutate(
+
+  across(
+    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+    ~ log1p(.),
+    .names = "{.col}_LOG" # Append "Log" to the column name
+  )
+  # ,
+  # across(
+  #   matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+  #   ~ ifelse(. == 0, NA, .),
+  #   .names = "{.col}_Only" # Append "Log" to the column name
+  # )
+  )
+
+
+data_clean <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
+
+return(data_clean)
+
 }
 
+preprocess_data_with_response <- function(data_t){
+
+  data_t <- data
+  data_clean <- preprocess_data(data_t)
+    
+  data_clean <- data_clean %>% 
+  mutate(
+    SalePriceLog = log(SalePrice)
+  )
+  
+  return(data_clean)
+  
+}
 
 
 ```
@@ -218,133 +264,7 @@ gg_miss_var(missings, show_pct = TRUE)
 
 ```
 
-### Fixing "Missing" but really missing data, and fix types
 
-```{r}
-
-library(bestNormalize)
-
-data_clean <- data %>% 
-  rename(
-    FirstFlrSF = '1stFlrSF',
-    SecondFlrSF = '2ndFlrSF',
-    ThirdSsnPorch = '3SsnPorch'
-  )
-
-#these look like factors
-data_clean <- data_clean %>% 
-  mutate(
-    OverallQual = as.factor(OverallQual),
-    OverallCond = as.factor(OverallCond),
-    MSSubClass = as.factor(MSSubClass),
-    SalePrice = SalePrice,
-    SalePriceLog = log(SalePrice),
-    PoolQC = ifelse(is.na(PoolQC), 'None', PoolQC),
-    MiscFeature = ifelse(is.na(MiscFeature), 'None', MiscFeature),
-    Alley = ifelse(is.na(Alley), 'None', Alley),
-    Fence = ifelse(is.na(Fence), 'None', Fence),
-    FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu),
-    GarageYrBlt = ifelse(is.na(GarageYrBlt) & is.na(GarageType), 0, GarageYrBlt),
-    GarageType = ifelse(is.na(GarageType), 'None', GarageType),
-    GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish),
-    GarageQual = ifelse(is.na(GarageQual), 'None', GarageQual),
-    GarageCond = ifelse(is.na(GarageCond), 'None', GarageCond),
-    BsmtQual = ifelse(is.na(BsmtQual), 'None', BsmtQual),
-    BsmtCond = ifelse(is.na(BsmtCond), 'None', BsmtCond),
-    BsmtExposure = ifelse(is.na(BsmtExposure), 'None', BsmtExposure),
-    BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2),
-    BsmtFinType1 = ifelse(is.na(BsmtFinType1), 'None', BsmtFinType1),
-    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
-  )
-
-data_clean <- data_clean %>% 
-  mutate(
-    HasGarage = ifelse(GarageType == 'None', 'No', 'Yes'),
-    HasBsmt = ifelse(BsmtQual == 'None', 'No', 'Yes'),
-    HasFence = ifelse(Fence == 'None', 'No', 'Yes'),
-    HasPool = ifelse(PoolQC == 'None', 'No', 'Yes'),
-    HasMiscFeature = ifelse(MiscFeature == 'None', 'No', 'Yes'),
-    HasAlley = ifelse(Alley == 'None', 'No', 'Yes'),
-    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes'),
-    HasSecondFloor = ifelse(SecondFlrSF == 0, 'No', 'Yes'),
-    HasVnr = ifelse(MasVnrType == 'None', 'No', 'Yes')
-    
-  )
-
-#chars to factors
-data_clean <- data_clean %>%
-  mutate_if(is.character, as.factor)
-
-
-data_all <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
-```
-### Imputing Missing Values
-
-It is given that missing values can be treat as missing at random. We will use the missForest package to impute missing values. This package uses a random forest algorithm to impute missing values.
-
-```{r}
-
-library(missForest)
-library(doParallel)
-library(naniar)
-
-
-
-
-missings <- data_clean %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
-
-#these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
-#also let's remove the ID column
-#excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
-
-#data_clean <- data_clean %>% select(-all_of(excluded_columns))
-
-set.seed(100)
-
-num_cores <- detectCores() - 2
-
-#impute missing values
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
-
-impute_vals <- missForest(data_clean, parallelize = 'variables')
-
-stopCluster(cl)
-
-data_all <- impute_vals$ximp
-
-```
-
-### Transformations
-
-```{r}
-
-library(bestNormalize)
-library(dplyr)
-
-
-data_all <- data_all %>%
-  mutate(
-
-  across(
-    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
-    ~ log1p(.),
-    .names = "{.col}_LOG" # Append "Log" to the column name
-  ),
-  across(
-    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
-    ~ ifelse(. == 0, NA, .),
-    .names = "{.col}_Only" # Append "Log" to the column name
-  )
-  )
-
-
-data_all <- data_all %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
-```
 
 ### Visual Plots
 
@@ -561,41 +481,41 @@ Let's take a closer look at the outiers in the Edwards Neighborhood. Properties 
 ```{r}
 
 
-data_filtered <- data %>% 
+data_filtered <- data_all %>% 
   dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
-  dplyr::select(SalePrice, GrLivArea, Neighborhood, Id) %>% 
-  dplyr::mutate(
-    Neighborhood = as.factor(Neighborhood),
-    SalePrice = log(SalePrice)
-  )
+  dplyr::select(SalePriceLog, GrLivArea, Neighborhood, Id) #%>% 
+  # dplyr::mutate(
+  #   Neighborhood = as.factor(Neighborhood),
+  #   #SalePrice = log(SalePrice)
+  # )
 
-data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePrice, colour = Neighborhood)) + 
+data_filtered %>% ggplot(aes(x=GrLivArea, y=SalePriceLog, colour = Neighborhood)) + 
   geom_point() +
   geom_smooth(method = "lm") +
   facet_grid(vars(Neighborhood))
 
 #baseline, without neighborhood
-m0 = lm(SalePrice ~ GrLivArea, data = data_filtered)
+m0 = lm(SalePriceLog ~ GrLivArea, data = data_filtered)
 s0 = summary(m0)
 
 #addative effect model, no interaction
-m1 = lm(SalePrice ~ GrLivArea + Neighborhood, data = data_filtered)
+m1 = lm(SalePriceLog ~ GrLivArea + Neighborhood, data = data_filtered)
 s1 = summary(m1)
 
 #interaction only model
-m2 = lm(SalePrice ~ GrLivArea:Neighborhood, data = data_filtered)
+m2 = lm(SalePriceLog ~ GrLivArea:Neighborhood, data = data_filtered)
 s2 = summary(m2)
 
 #GrLiveArea effect + Interaction
-m3 = lm(SalePrice ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
+m3 = lm(SalePriceLog ~ GrLivArea + GrLivArea:Neighborhood, data = data_filtered)
 s3 = summary(m3)
 
 #Neighborhood effect + Interaction
-m4 = lm(SalePrice ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+m4 = lm(SalePriceLog ~ Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
 s4 = summary(m4)
 
 #GrLiveArea and Neighborhood effect + Interaction
-m5 = lm(SalePrice ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
+m5 = lm(SalePriceLog ~ GrLivArea + Neighborhood + GrLivArea:Neighborhood, data = data_filtered)
 s5 = summary(m5)
 
 
@@ -618,9 +538,25 @@ str_glue("M2 vs M3 - Pvalue: {t2_3$`Pr(>F)`[[2]]}")
 str_glue("M3 vs M4 - Pvalue: {t3_4$`Pr(>F)`[[2]]}")
 str_glue("M4 vs M5 - Pvalue: {t4_5$`Pr(>F)`[[2]]}")
 
-generate_diagnosticPlots(m4)
+summary(m4)
 
+generate_diagnosticPlots(m4)
 generate_model_stats(m4, data_filtered)
+
+test_data <- preprocess_data(testData)
+
+test_data <- test_data %>% dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide'))
+
+predictions <- predict(m4, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_1.csv", row.names = FALSE)
+                                                         
 ```
 
 #### Log-Log
@@ -829,16 +765,40 @@ generate_diagnosticPlots(m)
 
 Model Statistics and Predictions
 
+- Kaggle Score: 0.31527
+
 ```{r}
 
 library(caret)
 library(doParallel)
 
-M <- lm(SalePrice ~ GarageArea, data = data_all)
+
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+missings <- test_data %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+
+M <- lm(SalePriceLog ~ GarageArea, data = data_all) 
 
 generate_diagnosticPlots(M)
 
-generate_model_stats(M, data_all)
+model <- generate_model_stats(M, data_all)
+
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_SLR.csv", row.names = FALSE)
 
 ```
 
@@ -1074,25 +1034,44 @@ print(lasso_coefficients)
 
 ##### M0 - USE THIS ONE - MANDATORY?
 
+- Kaggle Score: 0.29097
+
 ```{r}
 
 library(caret)
 library(doParallel)
 
-M <- lm(SalePrice ~ GrLivArea + FullBath, data = data_all)
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+missings <- test_data %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+
+M <- lm(SalePriceLog ~ GrLivArea + FullBath, data = data_all)
 
 generate_diagnosticPlots(M)
 
-generate_model_stats(M, data_all)
+model <- generate_model_stats(M, data_all)
 
-print('scaled version')
+predictions <- predict(model, newdata = test_data)
 
-generate_model_normalize_stats(M, data_all)
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M0.csv", row.names = FALSE)
 
 
 ```
 
-##### M1
+##### M1 - Use this one
 
 Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
 
@@ -1103,9 +1082,30 @@ library(doParallel)
 
 M <- readRDS('models/potential_model_1.rds')
 
-generate_diagnosticPlots(M)
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
 
-generate_model_stats(M, data_all)
+missings <- test_data %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+
+generate_diagnosticPlots(M$model)
+
+model <- generate_model_stats(M$model, data_all)
+
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M1.csv", row.names = FALSE)
 
 
 ```
@@ -1354,6 +1354,137 @@ ols_plot_added_variable(M$model)
 
 ```
 
+### Fixing "Missing" but really missing data, and fix types
+
+```{r}
+
+library(bestNormalize)
+
+data_clean <- data %>% 
+  rename(
+    FirstFlrSF = '1stFlrSF',
+    SecondFlrSF = '2ndFlrSF',
+    ThirdSsnPorch = '3SsnPorch'
+  )
+
+#these look like factors
+data_clean <- data_clean %>% 
+  mutate(
+    OverallQual = as.factor(OverallQual),
+    OverallCond = as.factor(OverallCond),
+    MSSubClass = as.factor(MSSubClass),
+    SalePrice = SalePrice,
+    SalePriceLog = log(SalePrice),
+    PoolQC = ifelse(is.na(PoolQC), 'None', PoolQC),
+    MiscFeature = ifelse(is.na(MiscFeature), 'None', MiscFeature),
+    Alley = ifelse(is.na(Alley), 'None', Alley),
+    Fence = ifelse(is.na(Fence), 'None', Fence),
+    FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu),
+    GarageYrBlt = ifelse(is.na(GarageYrBlt) & is.na(GarageType), 0, GarageYrBlt),
+    GarageType = ifelse(is.na(GarageType), 'None', GarageType),
+    GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish),
+    GarageQual = ifelse(is.na(GarageQual), 'None', GarageQual),
+    GarageCond = ifelse(is.na(GarageCond), 'None', GarageCond),
+    BsmtQual = ifelse(is.na(BsmtQual), 'None', BsmtQual),
+    BsmtCond = ifelse(is.na(BsmtCond), 'None', BsmtCond),
+    BsmtExposure = ifelse(is.na(BsmtExposure), 'None', BsmtExposure),
+    BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2),
+    BsmtFinType1 = ifelse(is.na(BsmtFinType1), 'None', BsmtFinType1),
+    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
+  )
+
+data_clean <- data_clean %>% 
+  mutate(
+    HasGarage = ifelse(GarageType == 'None', 'No', 'Yes'),
+    HasBsmt = ifelse(BsmtQual == 'None', 'No', 'Yes'),
+    HasFence = ifelse(Fence == 'None', 'No', 'Yes'),
+    HasPool = ifelse(PoolQC == 'None', 'No', 'Yes'),
+    HasMiscFeature = ifelse(MiscFeature == 'None', 'No', 'Yes'),
+    HasAlley = ifelse(Alley == 'None', 'No', 'Yes'),
+    HasFireplace = ifelse(FireplaceQu == 'None', 'No', 'Yes'),
+    HasSecondFloor = ifelse(SecondFlrSF == 0, 'No', 'Yes'),
+    HasVnr = ifelse(MasVnrType == 'None', 'No', 'Yes')
+    
+  )
+
+#chars to factors
+data_clean <- data_clean %>%
+  mutate_if(is.character, as.factor)
+
+
+data_all <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
+```
+
+
+### Transformations
+
+```{r}
+
+library(bestNormalize)
+library(dplyr)
+
+
+data_all <- data_all %>%
+  mutate(
+
+  across(
+    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+    ~ log1p(.),
+    .names = "{.col}_LOG" # Append "Log" to the column name
+  ),
+  across(
+    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+    ~ ifelse(. == 0, NA, .),
+    .names = "{.col}_Only" # Append "Log" to the column name
+  )
+  )
+
+
+data_all <- data_all %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
+```
+
+
+### Imputing Missing Values
+
+It is given that missing values can be treat as missing at random. We will use the missForest package to impute missing values. This package uses a random forest algorithm to impute missing values.
+
+```{r}
+
+library(missForest)
+library(doParallel)
+library(naniar)
+
+
+
+
+missings <- data_clean %>% 
+  dplyr::select(where(~ any(is.na(.))))
+
+gg_miss_var(missings)
+gg_miss_var(missings, show_pct = TRUE)
+
+#these columns are approximately missing 50 to 100% of data.  Let's not even try with these. 
+#also let's remove the ID column
+#excluded_columns <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu', 'Id')
+
+#data_clean <- data_clean %>% select(-all_of(excluded_columns))
+
+set.seed(100)
+
+num_cores <- detectCores() - 2
+
+#impute missing values
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+impute_vals <- missForest(data_clean, parallelize = 'variables')
+
+stopCluster(cl)
+
+data_all <- impute_vals$ximp
+
+data_all <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
+```
 
 #### NOT WORKING CODE
 
