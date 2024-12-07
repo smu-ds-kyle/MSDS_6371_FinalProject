@@ -51,14 +51,41 @@ ols_plot_dffits(model)
 ols_plot_resid_lev(model)
 }
 
+impute_missing_by_group <- function(data, group_col) {
+  # Ensure group_col exists
+  if (!group_col %in% names(data)) {
+    stop("The grouping column does not exist in the dataset.")
+  }
+  
+  # Function to calculate mode
+  mode_function <- function(x) {
+    x_non_na <- x[!is.na(x)]  # Remove NA values
+    if (length(x_non_na) == 0) return(NA)  # Return NA if all values are missing
+    return(as.character(names(sort(table(x_non_na), decreasing = TRUE))[1]))
+  }
+  
+  # Impute missing values
+  data <- data %>%
+    group_by(!!sym(group_col)) %>% 
+    mutate(
+      # Impute numeric columns with group median
+      across(where(is.numeric), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)),
+      # Impute categorical columns with group mode
+      across(where(is.factor), ~ ifelse(is.na(.), mode_function(.), as.factor(.))),
+      across(where(is.character), ~ ifelse(is.na(.), mode_function(.), as.character(.)))
+      
+    ) %>%
+    ungroup()
+  
+  return(data)
+}
 
 generate_model_stats <- function(model, data_set){
 
-#model <- model_custom  
-#data_set <- data_testing    
-#colSums(is.na(data_M))
-
 terms <- all.vars(terms(model))
+
+#needed for some inconsistencies I introduced in my project.  used SalePrice and SalePriceLog as response variables at different times, messes with me now unfortunately
+terms <- setdiff(terms, c('SalePrice','SalePriceLog'))
 
 data_M <- data_set %>% dplyr::select(all_of(terms), 'SalePriceLog')
 
@@ -139,14 +166,8 @@ data_clean <- data_clean %>%
     MasVnrType = ifelse(is.na(MasVnrType), 'None', MasVnrType)
   )
 
-
-
-
-missings <- data_clean %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
+#impute the rest of the missing values, to the median for numeric/ mode for catagorical, based on neighborhood
+data_clean <- impute_missing_by_group(data_clean,'Neighborhood')
 
 
 data_clean <- data_clean %>% 
@@ -168,11 +189,6 @@ data_clean <- data_clean %>%
   mutate_if(is.character, as.factor)
 
 
-missings <- data_clean %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
 
 data_clean <- data_clean %>%
   mutate(
@@ -204,7 +220,8 @@ preprocess_data_with_response <- function(data_t){
     
   data_clean <- data_clean %>% 
   mutate(
-    SalePriceLog = log(SalePrice)
+    SalePriceLog = log(SalePrice),
+    SalePrice = log(SalePrice)
   )
   
   return(data_clean)
@@ -776,19 +793,12 @@ library(doParallel)
 data_all <- preprocess_data_with_response(data)
 test_data <- preprocess_data(testData)
 
-missings <- test_data %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
-
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
 M <- lm(SalePriceLog ~ GarageArea, data = data_all) 
 
-generate_diagnosticPlots(M)
-
 model <- generate_model_stats(M, data_all)
+generate_diagnosticPlots(model$finalModel)
 
 predictions <- predict(model, newdata = test_data)
 
@@ -1044,19 +1054,12 @@ library(doParallel)
 data_all <- preprocess_data_with_response(data)
 test_data <- preprocess_data(testData)
 
-missings <- test_data %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
-
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
 M <- lm(SalePriceLog ~ GrLivArea + FullBath, data = data_all)
 
-generate_diagnosticPlots(M)
-
 model <- generate_model_stats(M, data_all)
+generate_diagnosticPlots(model$finalModel)
 
 predictions <- predict(model, newdata = test_data)
 
@@ -1073,6 +1076,8 @@ results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_
 
 ##### M1 - Use this one
 
+- Kaggle Score: 0.14395
+
 Found by MASS package, targeting AIC. Seems somewhat problematic perhaps. Histogram of residuals looks great and the residual scatter plot is decent, but the QQ plot looks mildly concerning as well as the leverage plot. Oddly,
 
 ```{r}
@@ -1085,17 +1090,10 @@ M <- readRDS('models/potential_model_1.rds')
 data_all <- preprocess_data_with_response(data)
 test_data <- preprocess_data(testData)
 
-missings <- test_data %>% 
-  dplyr::select(where(~ any(is.na(.))))
-
-gg_miss_var(missings)
-gg_miss_var(missings, show_pct = TRUE)
-
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
-generate_diagnosticPlots(M$model)
-
 model <- generate_model_stats(M$model, data_all)
+generate_diagnosticPlots(model$finalModel)
 
 predictions <- predict(model, newdata = test_data)
 
@@ -1115,26 +1113,42 @@ results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_
 
 Found by olsrr package, targeting adjr2 with forward selection on subjectively selected data
 
+- Kaggle Score: 0.14914
+
 ```{r}
 
 library(caret)
 library(doParallel)
 
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+
 M <- readRDS('models/forward_fit.rds')
 
-generate_diagnosticPlots(M$model)
+model <- generate_model_stats(M$model, data_all)
+generate_diagnosticPlots(m$finalModel)
 
-m <- generate_model_stats(M$model, data_all)
+predictions <- predict(model, newdata = test_data)
 
-test <- clean_and_process_data(testData)
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
 
-predictions <- predict(m, newdata = testData)
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M2.csv", row.names = FALSE)
 
 ```
 
 ##### M3
 
-Found by olsrr package, targeting adjr2 with both selection on subjectively selected data
+Found by olsrr package, targeting adjr2 with both selection on subjectively selected data. 
+
+- Kaggle Score: 0.14914   
+
+Need to check if this is the same mode as above, since the kaggle scores were the same.  or bug in my code. 
 
 ```{r}
 
@@ -1143,9 +1157,24 @@ library(doParallel)
 
 M <- readRDS('models/fit_both.rds')
 
-generate_diagnosticPlots(M$model)
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
 generate_model_stats(M$model, data_all)
+generate_diagnosticPlots(m$finalModel)
+
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M3.csv", row.names = FALSE)
+
 
 ```
 
@@ -1153,24 +1182,42 @@ generate_model_stats(M$model, data_all)
 
 Found by olsrr package, targeting adjr2 with both heir selection on subjectively selected data
 
+- Kaggle Score: 0.14914
+
 ```{r}
 
 library(caret)
 library(doParallel)
 
+
 M <- readRDS('models/fit_heir.rds')
 
-generate_diagnosticPlots(M$model)
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
 generate_model_stats(M$model, data_all)
+generate_diagnosticPlots(m$finalModel)
 
-names(data_all)
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M4.csv", row.names = FALSE)
+
 ```
 
 ##### M5 
 
 Let's look at the variables that we found in the visual analysis. 
 
+- M5.1 - Kaggle - Score: 0.14668
+- M5.2 - Kaggle - Score: 0.14665
 
 ```{r}
 
@@ -1178,49 +1225,61 @@ library(caret)
 library(parallel)
 library(olsrr)
 
+#calling this M5.1
 
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
 
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
-model1 <- lm(SalePriceLog ~ 
+M <- lm(SalePriceLog ~ 
               GrLivArea + GarageArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
               HasGarage + HasFireplace + HasVnr + HasSecondFloor + HasBsmt + BsmtCond + HasPool + PoolQC + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
               GrLivArea:Neighborhood + HasPool:PoolQC + HasGarage:GarageArea + HasVnr:MasVnrArea + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF +
               HasVnr:MasVnrArea:MasVnrType + HasBsmt:TotalBsmtSF:BsmtCond
               , data = data_all)
 
-ols_plot_cooksd_chart(model)
-ols_plot_cooksd_bar(model)
-ols_plot_dffits(model)
-ols_plot_resid_lev(model)
+model <- generate_model_stats(M, data_all)
+generate_diagnosticPlots(model$finalModel)
 
-generate_model_stats(model, data_all)
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M5_normaldata.csv", row.names = FALSE)
+
+
+#M5.2 - removing outliers
 
 
 data_all_minus_outliers <- data_all %>% filter(!(Id %in% c(1299, 1424, 235, 530, 523)))
 
-#recommend data adjustment when looking at a "hasx" var and everythign that doesn't have X is 0.
-
-
-
-model2 <- lm(SalePriceLog ~ 
+M <- lm(SalePriceLog ~ 
               GrLivArea + GarageArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
               HasGarage + HasFireplace + HasVnr + HasSecondFloor + HasBsmt + BsmtCond + HasPool + PoolQC + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
               GrLivArea:Neighborhood + HasPool:PoolQC + HasGarage:GarageArea + HasVnr:MasVnrArea + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF +
               HasVnr:MasVnrArea:MasVnrType + HasBsmt:TotalBsmtSF:BsmtCond
               , data = data_all_minus_outliers)
 
-ols_plot_cooksd_chart(model)
-ols_plot_cooksd_bar(model)
-ols_plot_dffits(model)
-ols_plot_resid_lev(model)
 
-generate_model_stats(model, data_all_minus_outliers)
+model <- generate_model_stats(M, data_all_minus_outliers)
+generate_diagnosticPlots(model$finalModel)
 
-ols_correlations(model1)
+predictions <- predict(model, newdata = test_data)
+
+results <- data.frame(
+  Id = test_data$Id,           
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
+
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M5_minus_outliers.csv", row.names = FALSE)
 
 
-
-#after removing some prefect colinearlity
 
 
 ```
