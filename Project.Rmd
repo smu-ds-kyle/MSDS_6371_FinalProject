@@ -497,6 +497,7 @@ Let's take a closer look at the outiers in the Edwards Neighborhood. Properties 
 
 ```{r}
 
+data_all <- preprocess_data_with_response(data)
 
 data_filtered <- data_all %>% 
   dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
@@ -1279,11 +1280,75 @@ results <- data.frame(
 
 results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M5_minus_outliers.csv", row.names = FALSE)
 
+```
+
+##### M6
+
+```{r}
+
+data_all <- preprocess_data_with_response(data)
+test_data <- preprocess_data(testData)
+
+data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+
+zero_indices <- which(data_all$SecondFlrSF == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_all$SecondFlrSF[random_index] <- 0.1
+}
+
+zero_indices <- which(data_all$TotalBsmtSF == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_all$TotalBsmtSF[random_index] <- 0.1
+}
+
+M <- lm(SalePriceLog ~ 
+              GrLivArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
+              HasFireplace +  BsmtCond + PoolQC + HasGarage + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
+              GrLivArea:Neighborhood + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF
+              , data = data_all)
+
+model <- generate_model_stats(M, data_all)
+generate_diagnosticPlots(model$finalModel)
+
+t1 = ols_step_both_adj_r2(M)
+t2 = ols_step_both_aic(M)
+t3 = ols_step_both_sbc(M)
+t4 = ols_step_both_sbic(M)
+t5 = ols_step_both_p(M)
+
+summary(t1)
+
+# predictions <- predict(model, newdata = test_data)
+# 
+# results <- data.frame(
+#   Id = test_data$Id,           
+#   PredictionsLog = predictions,
+#   SalePrice = exp(predictions)
+# )
+# 
+# results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M6_minus_outliers.csv", row.names = FALSE)
 
 
 
 ```
-Distributed Metric Checking? Just generating the list of all formulares takes forever... maybe easier to do on the wine data set? 
+
+
+
+Distributed Metric Checking? Just generating the list of all formulas takes forever... maybe easier to do on the wine data set? 
 
 ```{r}
 library(combinat)
