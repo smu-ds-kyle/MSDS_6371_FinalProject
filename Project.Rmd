@@ -45,7 +45,11 @@ hist(model$residuals,
 
 
 generate_model_stats <- function(model, data_set){
-  
+
+model <- model_custom  
+data_set <- data_testing    
+colSums(is.na(data_M))
+
 terms <- all.vars(terms(model))
 
 data_M <- data_set %>% dplyr::select(all_of(terms))
@@ -272,7 +276,7 @@ data_clean <- data_clean %>%
   mutate_if(is.character, as.factor)
 
 
-
+data_all <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
 ```
 ### Imputing Missing Values
 
@@ -330,8 +334,14 @@ data_all <- data_all %>%
     matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
     ~ log1p(.),
     .names = "{.col}_LOG" # Append "Log" to the column name
+  ),
+  across(
+    matches("(?i)(area|sf|sf1|sf2)$"), # Case-insensitive regex for "area" or "sf"
+    ~ ifelse(. == 0, NA, .),
+    .names = "{.col}_Only" # Append "Log" to the column name
   )
   )
+
 
 data_all <- data_all %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
 ```
@@ -345,6 +355,7 @@ Look at plots of all vars by the SalesPrice
 library(ggplot2)
 library(dplyr)
 library(DataExplorer)
+library(ggplot2)
 
 #plot_correlation(data_clean)
 
@@ -436,6 +447,8 @@ From a visual analysis, it looks to me that the following variables are likely t
 - HasSecondFlr:SecondFlrSF
 
 #### Potential 3-way Interactions
+
+Decided against using these as there are collinearity problems that I wasn't able to address fully and ran out of time. 
 
 - HasVnr:MasVnrArea:MassVnType
 - HasBsmt:TotalBsmtSF:BsmtCondition
@@ -1185,6 +1198,10 @@ generate_model_stats(model, data_all)
 
 data_all_minus_outliers <- data_all %>% filter(!(Id %in% c(1299, 1424, 235, 530, 523)))
 
+#recommend data adjustment when looking at a "hasx" var and everythign that doesn't have X is 0.
+
+
+
 model2 <- lm(SalePriceLog ~ 
               GrLivArea + GarageArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
               HasGarage + HasFireplace + HasVnr + HasSecondFloor + HasBsmt + BsmtCond + HasPool + PoolQC + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
@@ -1200,6 +1217,12 @@ ols_plot_resid_lev(model)
 generate_model_stats(model, data_all_minus_outliers)
 
 ols_correlations(model1)
+
+
+
+#after removing some prefect colinearlity
+
+
 ```
 Distributed Metric Checking? Just generating the list of all formulares takes forever... maybe easier to do on the wine data set? 
 
@@ -1207,6 +1230,8 @@ Distributed Metric Checking? Just generating the list of all formulares takes fo
 library(combinat)
 library(tidyverse)
 library(Metrics)
+library(dplyr)
+library(magrittr)
 
 # Function to compute metrics for a given formula
 evaluate_model <- function(formula, data) {
@@ -1234,22 +1259,86 @@ evaluate_model <- function(formula, data) {
   ))
 }
 
+library(parallel)
+
+# Create a function to generate formulas for a given combination size
+generate_formulas <- function(k, predictors) {
+  combn(predictors, k, simplify = FALSE) |>
+    lapply(function(comb) paste("SalePriceLog ~", paste(comb, collapse = " + ")))
+}
+
+# Define the predictors
 predictors <- c("GrLivArea", "GarageArea", "LotArea", "MasVnrArea", "SecondFlrSF", 
                 "TotalBsmtSF", "TotRmsAbvGrd", "YearBuilt", "YearRemodAdd",
                 "HasGarage", "HasFireplace", "HasVnr", "HasSecondFloor", 
                 "HasBsmt", "BsmtCond", "HasPool", "PoolQC", "MasVnrType", 
                 "Neighborhood", "OverallCond", "OverallQual", "Street", 
                 "GrLivArea:Neighborhood", "HasPool:PoolQC", "HasGarage:GarageArea", 
-                "HasVnr:MasVnrArea", "HasBsmt:TotalBsmtSF", "HasSecondFloor:SecondFlrSF",
-                "HasVnr:MasVnrArea:MasVnrType", "HasBsmt:TotalBsmtSF:BsmtCond")
+                "HasVnr:MasVnrArea", "HasBsmt:TotalBsmtSF", "HasSecondFloor:SecondFlrSF")
 
-# Generate all combinations of predictors
-formulas <- lapply(1:length(predictors), function(k) {
-  combn(predictors, k, simplify = FALSE) %>%
-    map(~ paste("SalePriceLog ~", paste(., collapse = " + ")))
-}) %>%
-  flatten() # Flatten list of lists
+# Set up parallel processing
+cl <- makeCluster(detectCores() - 1) # Use all but one core
+clusterExport(cl, c("predictors", "generate_formulas")) # Export objects to workers
 
+# Generate formulas in parallel
+formulas <- parLapply(cl, 1:length(predictors), function(k) {
+  generate_formulas(k, predictors)
+})
+
+stopCluster(cl) # Stop the cluster
+
+# Flatten list of lists
+formulas <- do.call(c, formulas)
+
+names(data_all)
+```
+
+maybe we can loop through stepwise a few times at different seeds and see if there is a consensus.
+
+```{r}
+
+library(foreach)
+library(parallel)
+library(olsrr)
+library(dplyr)
+library(car)
+library(doParallel)
+
+data_testing <- data_all# %>% filter(!(Id %in% c(1299, 1424)))
+
+zero_indices <- which(data_testing$SecondFlrSF == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_testing$SecondFlrSF[random_index] <- 0.1
+}
+
+zero_indices <- which(data_testing$TotalBsmtSF == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_testing$TotalBsmtSF[random_index] <- 0.1
+}
+
+model_custom <- lm(SalePriceLog ~ 
+              GrLivArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
+              HasFireplace +  BsmtCond + PoolQC + HasGarage + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
+              GrLivArea:Neighborhood + HasVnr:MasVnrArea + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF
+              , data = data_testing)
+          
+generate_diagnosticPlots(model_custom)
+
+generate_model_stats(model_custom, data_testing)
 
 ```
 
