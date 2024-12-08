@@ -15,9 +15,11 @@ library(ggplot2)
 
 Given a dataset of home prices and features in Ames, Iowa, we set out to analyze existing factors impacting home prices and look for predictive models that can accurately predict home prices. Our first analysis (Analysis 1) is descriptive in nature: specifically, we are interested in understanding the effect that living area has on home prices in three neighborhoods in Ames. Our second analysis (Analysis 2) is predictive: we explored several linear regression models of varying size and complexity in an effort to find the best model for predicting home prices. 
 
-## Note on Code Appendix
+## Note on Code Appendix and Figures
 
 The assignment calls for an appendix to include our code, but because the code for our project is quite long, we have instead opted to include the entire notebook on our project github, which can be found [here](https://github.com/smu-ds-kyle/MSDS_6371_FinalProject/blob/main/Project.Rmd).
+
+In order to keep the written paper at seven pages, we have moved our figures to the appendix to this document.
 
 # Data Description
 
@@ -33,21 +35,13 @@ Our first analysis examines the relationship between LogSalePrice and GrLivArea 
 
 ### Transformation of SalePrice
 
-An initial look at the data shows that the relationship between SalePrice and GrLivArea is positive and linear for all neighborhoods, with some outliers. However, because the distribution of SalePrice was right-skewed, we decided to use a log transformation of SalePrice in our analysis.
-
-![Scatterplot of SalePrice and GrLivAr](images/00_a1_saleprice.png)
-
-![Scatterplot of SalePriceLog and GrLivAr](images/00_a1_logsaleprice.png)
+An initial look at the data shows that the relationship between SalePrice and GrLivArea is positive and linear for all neighborhoods, with some outliers. However, because the distribution of SalePrice was right-skewed, we decided to use a log transformation of SalePrice in our analysis. See Figure 1 and 2in the appendix.
 
 ### Outliers in Edwards Neighborhood
 
-We identified two outliers (observations 524 and 1299) in the Edwards neighborhood for which an exceptionally large living area was associated with a lower-than-expected sale price. Extensive analysis of these influential points can be found in our code appendix. 
+We identified two outliers (observations 524 and 1299) in the Edwards neighborhood for which an exceptionally large living area was associated with a lower-than-expected sale price. Extensive analysis of these influential points can be found in our code appendix. See figure 3 in the appendix.
 
-![Scatterplot of SalePriceLog and GrLivAr by Neighborhood](images/00_a1_outliers.png)
-
-We removed both of these outliers from the dataset. For the sake of presentation to the client, we would disclose these outliers, and note that the model is based on a dataset that doesn't include them. By removing these two data points, we increased the adjusted R2 of our model by 8%. In keeping with the idea that "all models are wrong but some are useful", we believe that the best course of action is to present this model to the company with the caveat that it should only be used with houses 3000 square feet or less.
-
-![Scatterplot of SalePriceLog and GrLivAr by Neighborhood](images/00_a1_outliers2.png)
+We removed both of these outliers from the dataset. For the sake of presentation to the client, we would disclose these outliers, and note that the model is based on a dataset that doesn't include them. By removing these two data points, we increased the adjusted R2 of our model by 8%. In keeping with the idea that "all models are wrong but some are useful", we believe that the best course of action is to present this model to the company with the caveat that it should only be used with houses 3000 square feet or less. See figure 4 in the appendix.
 
 ### General Model
 
@@ -57,9 +51,7 @@ $$\log(\text{SalePrice}) = \beta_0 + \beta_1 \times \text{GrLivArea}_{\text{BrkS
 
 ## Results
 
-As shown in the code in our appendix, the results of our model are as follows:
-
-![Summary of Model](images/00_a1_summary.png)
+The results of our model are shown in Figure 5 in the appendix, as well as the code in our Github.
 
 The results show that the relationship between GrLivArea and LogSalePrice is positive for all neighborhoods, and the p-values of all coefficients is statistically signifcant. However, the magnitude of the effect varies by neighborhood: the effect of GrLivArea on LogSalePrice is smallest in the NAmes neighborhood and largest in the Edwards neighborhood. Our neighboorhood-specific models are as follows:
 
@@ -86,31 +78,25 @@ $$\log(\text{SalePrice}) = (10.79 + 0.6517) + 0.0003241 \times \text{GrLivArea}$
 
 ### Linearity
 
-The plot of residuals against fitted values shows no apparent pattern, which suggests that the assumption of linearity is met.
-
-![Residuals vs Fitted](images/03_a1_residual_plot.png)
+The plot of residuals against fitted values hows no apparent pattern, which suggests that the assumption of linearity is met (see Figure 6 in the appendix).
 
 ### Normality
 
-The Q-Q plot indicates that residuals closely follow a normal distribution, with some deviation at the extremes.
+The Q-Q plot indicates that residuals closely follow a normal distribution, with some deviation at the extremes (see Figure 7 in the appendix).
 
-![Q-Q Plot](images/04_a1_qq.png)
+
 
 ### Variance
 
-The spread of residuals in the residuals versus fitted plot (shown above) is relatively consistent across fitted values, which suggests that the assumption of constant variance is met.
+The spread of residuals in the residuals versus fitted plot (Figure 6) is relatively consistent across fitted values, which suggests that the assumption of constant variance is met.
 
 ### Independence
 
-No patterns or clustering are observed in the residuals versus fitted values plot (shown above), which that residuals are not correlated.
+No patterns or clustering are observed in the residuals versus fitted values plot (Figure 6), which that residuals are not correlated.
 
 ### Influential Points Analysis
 
-After removing the significant outliers mentioned above (observations 524 and 1299), the Cook's D and outlier-leverage diagnostics reveal a few remaining influential points. However, these points wereless impactful than those already removed, and while they are outside the normal range, we didn't deem them extreme enough to warrant removal.
-
-![Cook's D Plot](images/08_a1_cooks.png)
-
-![Outlier-Leverage Plot](images/10_a1_outliers.png)
+After removing the significant outliers mentioned above (observations 524 and 1299), the Cook's D and outlier-leverage diagnostics reveal a few remaining influential points. However, these points were less impactful than those already removed, and while they are outside the normal range, we didn't deem them extreme enough to warrant removal (see Figure 7 and 8 in the appendix).
 
 ## Parameter Estimates and Model Interpretation
 
@@ -149,9 +135,7 @@ $$\log(\text{SalePrice}) = \beta_0 + \beta_1 \times \text{GarageArea} + \epsilon
 
 ### Results
 
-As shown in the code in our appendix, we implemented Leave One Out Cross-Validation on our predictive models to evaluate their performance. The results of our model are as follows:
-
-![Summary of Model](images/00_a2_slr__summary.png)
+As shown in the code in our appendix, we implemented Leave One Out Cross-Validation on our predictive models to evaluate their performance. The results of our model are also shown in Figure 9 in the appendix.
 
 The results show that the relationship between GarageArea and LogSalePrice is positive, and the p-values for both the coefficient and intercept are statistically significant. The model has an adjusted R2 of 0.4301, which means that 43% of the variance in log-transformed sale price can be explained by the size of the garage. This is less promising than our descriptive model, but still a good start. 
 
@@ -165,31 +149,23 @@ This indicates that, on average, for every additional square foot of garage area
 
 #### Linearity
 
-![Residuals vs Fitted](images/12_a2_slr_residuals.png)
-
-The plot of residuals against fitted values shows no apparent pattern, indicating that the assumption of linearity is reasonably satisfied.
+The plot of residuals against fitted values shows no apparent pattern, indicating that the assumption of linearity is reasonably satisfied (see Figure 10 in the appendix).
 
 #### Normality
 
-![Q-Q Plot](images/13_a2_slr_qq.png)
-
-The Q-Q plot suggests that residuals follow a normal distribution, however some deviation is observed at the tails.
+The Q-Q plot suggests that residuals follow a normal distribution, however some deviation is observed at the tails (See Figure 11 in the appendix).
 
 #### Variance
 
-The spread of residuals in the residuals plot (shown) is relatively uniform across fitted values, indicating that the assumption of constant variance (homoscedasticity) is met.
+The spread of residuals in the residuals plot (shown in Figure 10) is relatively uniform across fitted values, indicating that the assumption of constant variance (homoscedasticity) is met.
 
 #### Independence
 
-No patterns or unusual  are visible in the residuals plot (shown above), which supports the assumption of independence.
+No patterns or unusual  are visible in the residuals plot (shown in Figure 10), which supports the assumption of independence.
 
 #### Influential Points Analysis
 
-![Cook's D Plot](images/17_a2_slr_cooks_bar.png)
-
-![Outliers-Leverage Plot](images/19_a2_slr_outliers.png)
-
-The Cook's D and outlier-leverage plots identify a few influential points (such as observations 1061 and 1190), but they they appear to be minor violations of the assumptions and were not removed.
+The Cook's D and outlier-leverage plots identify a few influential points (such as observations 1061 and 1190), but they they appear to be minor violations of the assumptions and were not removed (see Figures 12 and 13 in the appendix).
 
 ## Model 2: Multiple Linear Regression (GrLivArea + FullBath)
 
@@ -201,9 +177,7 @@ $$\log(\text{SalePrice}) = \beta_0 + \beta_1 \times \text{GrLivArea} + \beta_2 \
 
 ### Results
 
-As with the simple linear model, we implemented Leave One Out Cross-Validation on our first multiple linear model to evaluate its performance. The results of our model are as follows:
-
-![Summary of GrLivArea + FullBath Model](images/00_a2_mlr0__summary.png)
+As with the simple linear model, we implemented Leave One Out Cross-Validation on our first multiple linear model to evaluate its performance. The results of our model are shown in Figure 14 in the appendix (as well as the full code on Github).
 
 This results indicate that, on average, for every additional square foot of living area, the log of the sale price increases by 0.000458, and for each additional full bathroom, the log of the sale price increases by 0.1631, holding other variables constant. The intercept (11.08) represents the baseline log-sale price when both predictors are zero. This is obviously not practically feasible (as a house must have at least some living area, and it is unusual for a single family home to have no full bathrooms, though I have made do with some very small bathrooms!), thus it exists solely as a parameter in the model.
 
@@ -217,31 +191,23 @@ $$\log(\text{SalePrice}) = 11.08 + 0.000458 \times \text{GrLivArea} + 0.1631 \ti
 
 #### Linearity
 
-![Residuals vs Fitted](images/21_a2_mlr_0_residuals.png)
-
-The plot of residuals against fitted values shows no apparent pattern, indicating that the assumption of linearity is reasonably satisfied.
+The plot of residuals against fitted values shows no apparent pattern, indicating that the assumption of linearity is reasonably satisfied (see Figure 15 in the appendix).
 
 #### Normality
 
-![Q-Q Plot](images/22_a2_mlr_0_qq.png)
-
-The Q-Q plot suggests that residuals follow a normal distribution, however some moderate deviation is observed at the tails.
+The Q-Q plot suggests that residuals follow a normal distribution, however some moderate deviation is observed at the tails (See Figure 16 in the appendix).
 
 #### Variance
 
-The spread of residuals in the residuals plot (shown) is relatively uniform across fitted values, indicating that the assumption of constant variance (homoscedasticity) is met.
+The spread of residuals in the residuals plot (shown in Figure 17 in the appendix) is relatively uniform across fitted values, indicating that the assumption of constant variance (homoscedasticity) is met.
 
 #### Independence
 
-No patterns or unusual  are visible in the residuals plot (shown above), which supports the assumption of independence.
+No patterns or unusual are visible in the residuals plot (shown in Figure 17 in the appendix), which supports the assumption of independence.
 
 #### Influential Points Analysis
 
-![Cook's D Plot](images/26_a2_mlr_0_cooks_bar.png)
-
-![Outliers-Leverage Plot](images/28_a2_mlr_0_outliers.png)
-
-The Cook's D plot and the outlier-leverage plot identify a few points with high leverage or influence, such as observation 54. While these points do exceed the threshold for influence, we didn't think that they severely distorted the model, and we did not remove them.
+The Cook's D plot and the outlier-leverage plot identify a few points with high leverage or influence, such as observation 54. While these points do exceed the threshold for influence, we didn't think that they severely distorted the model, and we did not remove them (see Figures 17 and 18 in the appendix).
 
 ## Linear Model Comparison Table
 
@@ -254,3 +220,41 @@ To evaluate the relative performance of our models, we have compiled a table com
 | MLR3                        |             |               |                 |              |
 | MLR4                        |             |               |                 |              |
 | MLR5                        |             |               |                 |              |
+
+# Appendix: Figures
+
+![Figure 1: Scatterplot of SalePrice and GrLivAr](images/00_a1_saleprice.png)
+
+![Figure 2: Scatterplot of SalePriceLog and GrLivAr](images/00_a1_logsaleprice.png)
+
+![Figure 3: Scatterplot of SalePriceLog and GrLivAr by Neighborhood](images/00_a1_outliers.png)
+
+![Figure 4: Scatterplot of SalePriceLog and GrLivAr by Neighborhood](images/00_a1_outliers2.png)
+
+![Figure 5: Summary of Descrtiptive Model](images/00_a1_summary.png)
+
+![Figure 6: Residuals vs Fitted, Descriptive Model](images/03_a1_residual_plot.png)
+
+![Figure 7: Cook's D Plot for Descriptive Model](images/08_a1_cooks.png)
+
+![Figure 8: Outlier-Leverage Plot for Descriptive Model](images/10_a1_outliers.png)
+
+![Figure 9: Summary of Simple Linear Model](images/00_a2_slr__summary.png)
+
+![Figure 10: Residuals vs Fitted for Simple Linear Model](images/12_a2_slr_residuals.png)
+
+![Figure 11: Q-Q Plot for Simple Linear Model](images/13_a2_slr_qq.png)
+
+![Figure 12: Cook's D Plot for Simple Linear Model](images/17_a2_slr_cooks_bar.png)
+
+![Figure 13: Outliers-Leverage Plot for Simple Linear Model](images/19_a2_slr_outliers.png)
+
+![Figure 14: Summary of GrLivArea + FullBath Model](images/00_a2_mlr0__summary.png)
+
+![Figure 15: Residuals vs Fitted for GrLivArea + FullBath Model](images/21_a2_mlr_0_residuals.png)
+
+![Figure 16: Q-Q Plot for GrLivArea + FullBath Model](images/22_a2_mlr_0_qq.png)
+
+![Figure 17: Cook's D Plot for GrLivArea + FullBath Model](images/26_a2_mlr_0_cooks_bar.png)
+
+![Figure 18: Outliers-Leverage Plot for GrLivArea + FullBath Model](images/28_a2_mlr_0_outliers.png)

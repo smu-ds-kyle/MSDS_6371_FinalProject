@@ -80,9 +80,9 @@ ggplot(filtered_data, aes(x = Neighborhood, y = log_GrLivArea, fill = Neighborho
 ```
 
 ```{r}
-ggplot(filtered_data, aes(x = GrLivArea, y = SalePrice, color = Neighborhood)) +
+ggplot(filtered_data, aes(x = GrLivArea, y = LogSalePrice, color = Neighborhood)) +
   geom_point(alpha = 0.6) +
-  labs(title = "Sale Price vs. Living Area by Neighborhood") +
+  labs(title = "Log Sale Price vs. Living Area by Neighborhood") +
   theme_few()
 
 ggplot(filtered_data, aes(x = log(GrLivArea), y = LogSalePrice, color = Neighborhood)) +
@@ -122,6 +122,11 @@ confint(model)
 data_no_influential = filtered_data[!(filtered_data$Id %in% c("524", "1299")), ]
 refined_model = lm(LogSalePrice ~ GrLivArea * Neighborhood, data = data_no_influential)
 summary(refined_model)
+
+ggplot(data_no_influential, aes(x = GrLivArea, y = LogSalePrice, color = Neighborhood)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Log Sale Price vs. Living Area by Neighborhood (Removed Outliers)") +
+  theme_few()
 ```
 
 # Analysis 2
