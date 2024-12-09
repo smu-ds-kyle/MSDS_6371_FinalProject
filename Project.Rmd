@@ -117,7 +117,7 @@ stopCluster(cl)
 return(model)
 }
 
-preprocess_data <- function(data_t){
+preprocess_data <- function(data_t, orderFactors = FALSE){
   
   #data_t = testData
   
@@ -150,7 +150,14 @@ data_clean <- data_clean %>%
     BsmtExposure = ifelse(is.na(BsmtExposure), 'None', BsmtExposure),
     BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2),
     BsmtFinType1 = ifelse(is.na(BsmtFinType1), 'None', BsmtFinType1),
-    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea)
+    MasVnrArea = ifelse(MasVnrType == 'None' & is.na(MasVnrArea), 0, MasVnrArea),
+    NeighborhoodClass = case_when(
+    Neighborhood %in% c("NoRidge", "NridgHt", "StoneBr") ~ "Wealthy",
+    Neighborhood %in% c("Timber", "Veenker", "Somerst", "ClearCr", 
+                        "Crawfor", "CollgCr", "Blmngtn", "Gilbert", 
+                        "NWAmes", "SawyerW") ~ "Middle",
+    TRUE ~ "Lower"
+    )
   )
 
 #impute lot frontage with the median lotfrantage by neighborhood
@@ -184,9 +191,75 @@ data_clean <- data_clean %>%
     
   )
 
+#ordinal factors
+data_clean <- data_clean %>% 
+  mutate(
+    ExterQual = factor(ExterQual, levels = c('Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    ExterCond = factor(ExterCond, levels = c('Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    BsmtQual = factor(BsmtQual, levels = c('None', 'Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    BsmtCond = factor(BsmtCond, levels = c('None', 'Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    BsmtExposure = factor(BsmtExposure, levels = c('None', 'No', 'Mn', 'Av', 'Gd'), ordered = TRUE),
+    BsmtFinType1 = factor(BsmtFinType1, levels = c('None', 'Unf', 'LwQ', 'Rec', 'BLQ', 'ALQ', 'GLQ'), ordered = orderFactors),
+    BsmtFinType2 = factor(BsmtFinType2, levels = c('None', 'Unf', 'LwQ', 'Rec', 'BLQ', 'ALQ', 'GLQ'), ordered = orderFactors),
+    HeatingQC = factor(HeatingQC, levels = c('Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    KitchenQual = factor(KitchenQual, levels = c('Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    Functional = factor(Functional, levels = c('Sal', 'Sev', 'Maj2', 'Maj1', 'Mod', 'Min2', 'Min1', 'Typ'), ordered = orderFactors),
+    FireplaceQu = factor(FireplaceQu, levels = c('None', 'Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    GarageFinish = factor(GarageFinish, levels = c('None', 'Unf', 'RFn', 'Fin'), ordered = orderFactors),
+    GarageQual = factor(GarageQual, levels = c('None', 'Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    GarageCond = factor(GarageCond, levels = c('None', 'Po', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    PoolQC = factor(PoolQC, levels = c('None', 'Fa', 'TA', 'Gd', 'Ex'), ordered = orderFactors),
+    Fence = factor(Fence, levels = c('None', 'MnWw', 'GdWo', 'MnPrv', 'GdPrv'), ordered = orderFactors),
+    NeighborhoodClass = factor(NeighborhoodClass, levels = c('Lower', 'Middle', 'Wealthy'), ordered = orderFactors),
+    PavedDrive = factor(PavedDrive, levels = c('N', 'P', 'Y'), ordered = orderFactors)
+  )
+
+#ordinal factors to numbers, cause why not
+
+data_clean <- data_clean %>% 
+  mutate(
+    ExterQual_Num = as.numeric(ExterQual),
+    ExterCond_Num = as.numeric(ExterCond),
+    BsmtQual_Num = as.numeric(BsmtQual),
+    BsmtCond_Num = as.numeric(BsmtCond),
+    BsmtExposure_Num = as.numeric(BsmtExposure),
+    BsmtFinType1_Num = as.numeric(BsmtFinType1),
+    BsmtFinType2_Num = as.numeric(BsmtFinType2),
+    HeatingQC_Num = as.numeric(HeatingQC),
+    KitchenQual_Num = as.numeric(KitchenQual),
+    Functional_Num = as.numeric(Functional),
+    FireplaceQu_Num = as.numeric(FireplaceQu),
+    GarageFinish_Num = as.numeric(GarageFinish),
+    GarageQual_Num = as.numeric(GarageQual),
+    GarageCond_Num = as.numeric(GarageCond),
+    PoolQC_Num = as.numeric(PoolQC),
+    Fence_Num = as.numeric(Fence),
+    NeighborhoodClass_Num = as.numeric(NeighborhoodClass),
+    PavedDrive_Num = as.numeric(PavedDrive)
+  )
+
+
+
 #chars to factors
 data_clean <- data_clean %>%
   mutate_if(is.character, as.factor)
+
+
+#more feature creation after everything has been imputed. 
+
+data_clean <- data_clean %>% 
+  mutate(
+    TotalAreaSF = TotalBsmtSF + FirstFlrSF + SecondFlrSF + GarageArea,
+    TotalBaths = FullBath + (.5 * HalfBath) + BsmtFullBath + (.5 * BsmtHalfBath),
+    YearsSinceRemodel = YearRemodAdd - YearBuilt,
+    QualityTotalSF = TotalAreaSF * OverallQual,
+    QualityTotalSF_SQ = (TotalAreaSF^2) * OverallQual,
+    QualityBsmtSF = BsmtQual_Num * BsmtFinSF1,
+    QualityBsmtSF_SQ = (BsmtFinSF1^2) * BsmtQual_Num,
+  )
+
+
+
 
 
 
@@ -206,6 +279,15 @@ data_clean <- data_clean %>%
   # )
   )
 
+#create polynomial features
+
+data_clean <- data_clean %>% 
+  mutate(
+    TotalAreaSF_SQ = TotalAreaSF^2,
+    TotalAreaSF_LOG_SQ = TotalAreaSF_LOG^2,
+    TotalBsmt_SQ = TotalBsmtSF^2,
+    FirstFloor_SQ = FirstFlrSF^2,
+  )
 
 data_clean <- data_clean %>%  dplyr::select(order(colnames(.))) # Order columns by name ascending
 
@@ -213,10 +295,10 @@ return(data_clean)
 
 }
 
-preprocess_data_with_response <- function(data_t){
+preprocess_data_with_response <- function(data_t, orderFactors = FALSE){
 
   data_t <- data
-  data_clean <- preprocess_data(data_t)
+  data_clean <- preprocess_data(data_t, orderFactors)
     
   data_clean <- data_clean %>% 
   mutate(
@@ -292,26 +374,33 @@ Look at plots of all vars by the SalesPrice
 library(ggplot2)
 library(dplyr)
 library(DataExplorer)
-library(ggplot2)
+library(plotly)
 
-#plot_correlation(data_clean)
 
-#plot_boxplot(data_clean %>% select(-Id), by = "SalePrice", ncol = 1, nrow = 1, geom_boxplot_args = list(outlier.colour = "red", outlier.shape = 1))
+data_all <- preprocess_data_with_response(data)
 
+data_all <- data_all %>% filter(!(Id %in% c(1299,314,524, 250, 336, 739, 1374, 4997,1045,530,1025,1062,1356,582,452,707,534,1045,1374,441,497,333)))
+
+
+
+#data_c$group1 <- ifelse(data_c$Id %in% c(376,1422, 810, 1182, 599, 956, 198, 1385, 1170, 399), 1, 0)
 
 # Assuming your dataset is `data` and response variable is `response`
 numeric_vars <- data_all %>%
   dplyr::select(where(is.numeric)) %>%
-  dplyr::select(-SalePrice, -Id, -SalePriceLog) # Exclude the response variable from predictors
+  dplyr::select(-SalePrice, -SalePriceLog) # Exclude the response variable from predictors
 
 # Create scatter plots for numeric predictors
 for (var in names(numeric_vars)) {
-  p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog")) +
-    geom_point(alpha = 0.7) +
-    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog", color = data_all$Q, text = data_all$Id)) +
+    geom_point() +
+    #geom_smooth(method = "loess", se = FALSE, color = "blue") +
+    #geom_smooth(method = "lm", se = FALSE, color = "red") +
+    #geom_text(aes_string(label = "Id"), vjust = -0.5, size = 3, color = "red") + 
     labs(title = paste("Scatter Plot of", var, "vs SalePriceLog"),
          x = var, y = "SalePriceLog") +
-    theme_minimal()
+    theme_minimal() +
+    facet_grid(vars(data_all$NeighborhoodClass))
   
   # p2 <- ggplot(data_clean, aes_string(x = var, y = "SalePrice")) +
   #   geom_boxplot(outliers = TRUE, outlier.colour = "RED", outlier.shape = 2) +
@@ -320,23 +409,75 @@ for (var in names(numeric_vars)) {
   #   theme_minimal()
   # 
   # print(p2)
-  print(p)
+  pl <- ggplotly(p)
+  print(pl)
 }
 
-catagorical_vars <- data_all %>%
-  dplyr::select(where(is.factor))
+# catagorical_vars <- data_all %>%
+#   dplyr::select(where(is.factor))
                 
-for (var in names(catagorical_vars)) {
-  
-   p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog")) +
-    geom_boxplot(outliers = TRUE, outlier.colour = "RED", outlier.shape = 2) +
-    labs(title = paste("Box Plot of", var, "vs SalePriceLog"),
-         x = var, y = "SalePriceLog") +
-    theme_minimal()
-  
-  print(p)
+# for (var in names(catagorical_vars)) {
+#   
+#    p <- ggplot(data_all, aes_string(x = var, y = "SalePriceLog")) +
+#     geom_boxplot(outliers = TRUE, outlier.colour = "RED", outlier.shape = 2) +
+#     labs(title = paste("Box Plot of", var, "vs SalePriceLog"),
+#          x = var, y = "SalePriceLog") +
+#     theme_minimal()
+#   
+#   print(p)
+# }
+
+
+
+```
+### Outliers
+
+```{r}
+
+library(outliers)
+
+most_extreme <-outlier(data_all$GarageArea)
+
+predictors <- names(data_all %>% select(-SalePriceLog, -SalePrice, -Id))
+
+outlier_list <- list()
+for (var in predictors) {
+  mod <- lm(SalePrice ~ data_all[[var]], data = data_all)
+  res <- resid(mod)
+  cutoff <- quantile(abs(res), 0.995)  # top 0.5% as outliers
+  flagged <- which(abs(res) > cutoff)
+  outlier_list[[var]] <- flagged
 }
 
+numeric_vars <- names(data_all)[sapply(data_all, is.numeric) & names(data_all) != "SalePriceLog"]
+
+# Define cutoff thresholds
+lower_cutoff <- 0.005  # e.g., bottom 0.5%
+upper_cutoff <- 0.995  # e.g., top 0.5%
+
+# Group by Neighborhood and determine outliers for each numeric variable
+data_outliers <- data_all %>%
+  group_by(NeighborhoodClass) %>%
+  do({
+    df <- .
+    # For each numeric variable, determine which rows are outliers
+    outlier_flags <- lapply(numeric_vars, function(var) {
+      vals <- df[[var]]
+      # Compute quantiles for the current neighborhood
+      low_bound <- quantile(vals, lower_cutoff, na.rm = TRUE)
+      high_bound <- quantile(vals, upper_cutoff, na.rm = TRUE)
+      # Flag rows that are outliers
+      (vals < low_bound) | (vals > high_bound)
+    })
+    
+    # Convert list of logical vectors to a data frame
+    outlier_df <- as.data.frame(outlier_flags)
+    names(outlier_df) <- paste0(numeric_vars, "_Outlier")
+    
+    # Bind the outlier flags back to the original data
+    bind_cols(df, outlier_df)
+  }) %>%
+  ungroup()
 
 
 ```
@@ -392,7 +533,7 @@ Decided against using these as there are collinearity problems that I wasn't abl
 
 ## ANALYSIS 1:
 
-**Assume that Century 21 Ames (a real estate company) in Ames Iowa has commissioned you to answer a very important question with respect to their business. Century 21 Ames only sells houses in the NAmes, Edwards and BrkSide neighborhoods and would like to simply get an estimate of how the SalePrice of the house is related to the square footage of the living area of the house (GrLIvArea) and if the SalesPrice (and its relationship to square footage) depends on which neighborhood the house is located in. Build and fit a model that will answer this question, keeping in mind that realtors prefer to talk about living area in increments of 100 sq. ft. Provide your client with the estimate (or estimates if it varies by neighborhood) as well as confidence intervals for any estimate(s) you provide. It turns out that Century 21’s leadership team has a member that has some statistical background. Therefore, make sure and provide evidence that the model assumptions are met and that any suspicious observations (outliers / influential observations) have been identified and addressed. Finally, of course, provide your client with a well written conclusion that quantifies the relationship between living area and sale price with respect to these three neighborhoods. Remember that the company is only concerned with the three neighborhoods they sell in.**
+**Assume that Century 21 Ames (a real estate company) in Ames Iowa has commissioned you to answer a very important question with respect to their business. Century 21 Ames only sells houses in the NAmes, Edwards and BrkSide neighborhoods and would like to simply get an estimate of how the SalePrice of the house is related to the square footage of the living area of the house (GrLIvArea) and if the SalesPrice (and its relationship to square footage) depends on which neighborhood the house is located in. Build and fit a model that will answer this question, keeping in mind that realtors per to talk about living area in increments of 100 sq. ft. Provide your client with the estimate (or estimates if it varies by neighborhood) as well as confidence intervals for any estimate(s) you provide. It turns out that Century 21’s leadership team has a member that has some statistical background. Theore, make sure and provide evidence that the model assumptions are met and that any suspicious observations (outliers / influential observations) have been identified and addressed. Finally, of course, provide your client with a well written conclusion that quantifies the relationship between living area and sale price with respect to these three neighborhoods. Remember that the company is only concerned with the three neighborhoods they sell in.**
 
 Filter and select the relevant data, then look at assumptions. From initial observatsions on the raw data, there does seem to be a general positive, linear relationship between GrLiveArea and SalePrice. However, the SalePrice data look to be right skewed, particularly in the Edwards and NAmes neighborhoods. Additionally, with the Edwards neighborhood, there seem to be several highly influential and high leverage points. Will readdress these points with a log of SalesPrice in the next code block.
 
@@ -497,7 +638,7 @@ Let's take a closer look at the outiers in the Edwards Neighborhood. Properties 
 
 ```{r}
 
-data_all <- preprocess_data_with_response(data)
+data_all <- preprocess_data_with_response(data, orderFactors = FALSE)
 
 data_filtered <- data_all %>% 
   dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide') & !(Id %in% c(1299,524))) %>% 
@@ -561,20 +702,9 @@ summary(m4)
 generate_diagnosticPlots(m4)
 generate_model_stats(m4, data_filtered)
 
-test_data <- preprocess_data(testData)
+summary(m4)
+confint(m4)
 
-test_data <- test_data %>% dplyr::filter(Neighborhood %in% c('NAmes','Edwards','BrkSide'))
-
-predictions <- predict(m4, newdata = test_data)
-
-results <- data.frame(
-  Id = test_data$Id,           
-  PredictionsLog = predictions,
-  SalePrice = exp(predictions)
-)
-
-results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_1.csv", row.names = FALSE)
-                                                         
 ```
 
 #### Log-Log
@@ -1052,7 +1182,7 @@ print(lasso_coefficients)
 library(caret)
 library(doParallel)
 
-data_all <- preprocess_data_with_response(data)
+data_all <- preprocess_data_with_response(data, orderFactors = FALSE)
 test_data <- preprocess_data(testData)
 
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
@@ -1088,7 +1218,7 @@ library(doParallel)
 
 M <- readRDS('models/potential_model_1.rds')
 
-data_all <- preprocess_data_with_response(data)
+data_all <- preprocess_data_with_response(data, FALSE)
 test_data <- preprocess_data(testData)
 
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
@@ -1129,7 +1259,10 @@ data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 M <- readRDS('models/forward_fit.rds')
 
 model <- generate_model_stats(M$model, data_all)
-generate_diagnosticPlots(m$finalModel)
+#generate_diagnosticPlots(m$finalModel)
+
+#ols_plot_cooksd_bar(model$finalModel)
+ols_plot_diagnostics(model$finalModel)
 
 predictions <- predict(model, newdata = test_data)
 
@@ -1143,13 +1276,13 @@ results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_
 
 ```
 
-##### M3
+##### M3 - Use this one
 
 Found by olsrr package, targeting adjr2 with both selection on subjectively selected data. 
 
 - Kaggle Score: 0.14914   
 
-Need to check if this is the same mode as above, since the kaggle scores were the same.  or bug in my code. 
+Need to check if this is the same mode as above, since the kaggle scores were the same. 
 
 ```{r}
 
@@ -1163,8 +1296,11 @@ test_data <- preprocess_data(testData)
 
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
-generate_model_stats(M$model, data_all)
-generate_diagnosticPlots(m$finalModel)
+model <- generate_model_stats(M$model, data_all)
+#generate_diagnosticPlots(m$finalModel)
+
+#ols_plot_cooksd_bar(model$finalModel)
+ols_plot_diagnostics(model$finalModel)
 
 predictions <- predict(model, newdata = test_data)
 
@@ -1198,7 +1334,7 @@ test_data <- preprocess_data(testData)
 
 data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
 
-generate_model_stats(M$model, data_all)
+model <- generate_model_stats(M$model, data_all)
 generate_diagnosticPlots(m$finalModel)
 
 predictions <- predict(model, newdata = test_data)
@@ -1286,10 +1422,18 @@ results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_
 
 ```{r}
 
+library(doParallel)
+library(caret)
+library(dplyr)
+library(stringr)
+library(olsrr)
+library(car)
+
 data_all <- preprocess_data_with_response(data)
 test_data <- preprocess_data(testData)
 
-data_all <- data_all %>% filter(!(Id %in% c(1299,524)))
+data_all <- data_all %>% filter(!(Id %in% c(1299,314,524, 250, 336, 739, 1374, 4997,1045,530,1025,1062,1356,582,452,707,534,1045,1374,441,497,333)))
+#data_all <- data_all %>% filter(!(Id %in% c(1299,314,524, 250, 336, 739, 1374, 4997,1045,530,1025,1062,1356,582,452,707,534,1045,1374,441,497,333, 999, 988, 407, 578, 89)))
 
 zero_indices <- which(data_all$SecondFlrSF == 0)
 
@@ -1303,6 +1447,19 @@ if (length(zero_indices) > 0) {
   data_all$SecondFlrSF[random_index] <- 0.1
 }
 
+zero_indices <- which(data_all$SecondFlrSF_LOG == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_all$SecondFlrSF_LOG[random_index] <- 0.1
+}
+
+
 zero_indices <- which(data_all$TotalBsmtSF == 0)
 
 # Check if there are any rows with 0
@@ -1315,34 +1472,151 @@ if (length(zero_indices) > 0) {
   data_all$TotalBsmtSF[random_index] <- 0.1
 }
 
-M <- lm(SalePriceLog ~ 
-              GrLivArea + LotArea + MasVnrArea + SecondFlrSF + TotalBsmtSF + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
-              HasFireplace +  BsmtCond + PoolQC + HasGarage + MasVnrType + Neighborhood + OverallCond + OverallQual + Street + 
-              GrLivArea:Neighborhood + HasBsmt:TotalBsmtSF + HasSecondFloor:SecondFlrSF
-              , data = data_all)
+zero_indices <- which(data_all$TotalBsmtSF_LOG == 0)
 
-model <- generate_model_stats(M, data_all)
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_all$TotalBsmtSF_LOG[random_index] <- 0.1
+}
+
+zero_indices <- which(data_all$GarageYrBlt == 0)
+
+# Check if there are any rows with 0
+if (length(zero_indices) > 0) {
+  # Randomly select one index from the rows where SecondFlrSF is 0
+  set.seed(100)
+  random_index <- sample(zero_indices, 1)
+  
+  # Replace the value at that index with 0.1
+  data_all$GarageYrBlt[random_index] <- 0.1
+}
+
+# M <- lm(SalePriceLog ~ 
+#               GrLivArea_LOG + LotArea_LOG + MasVnrArea_LOG + SecondFlrSF_LOG + TotalBsmtSF_LOG + TotRmsAbvGrd + YearBuilt + YearRemodAdd +
+#               HasFireplace +  BsmtCond + PoolQC + MasVnrType + HasGarage + Neighborhood + OverallCond + OverallQual + Street + 
+#               GrLivArea_LOG:Neighborhood + HasBsmt:TotalBsmtSF_LOG + HasSecondFloor:SecondFlrSF_LOG 
+#               , data = data_all)
+
+
+
+# M <- lm(SalePriceLog ~ 
+#               LotArea_LOG + MasVnrArea_LOG + + TotalBaths + YearsSinceRemodel +
+#               HasFireplace +  HasGarage + OverallQual + GarageCars +
+#               TotalAreaSF_LOG:NeighborhoodClass + 
+#                 OverallQual:GrLivArea_LOG
+#               , data = data_all)
+
+# M <- lm(
+#   SalePriceLog ~
+#     BsmtExposure_Num +
+#     BsmtFinSF1 +
+#     BsmtFinSF2 +
+#     BsmtFinSF2_LOG +
+#     BsmtFinType1_Num +
+#     BsmtQual_Num +
+#     CentralAir +
+#     Condition1 +
+#     EnclosedPorch +
+#     ExterCond_Num +
+#     Exterior1st +
+#     Fireplaces +
+#     Foundation +
+#     Functional_Num +
+#     GarageArea_LOG +
+#     HalfBath +
+#     Heating +
+#     HeatingQC_Num +
+#     KitchenAbvGr +
+#     KitchenQual_Num +
+#     LandSlope +
+#     LotArea_LOG +
+#     LotConfig +
+#     MasVnrType +
+#     MSZoning +
+#     Neighborhood +
+#     OpenPorchSF +
+#     OverallCond +
+#     OverallQual +
+#     PoolQC_Num +
+#     SaleCondition +
+#     SaleType +
+#     ScreenPorch +
+#     Street +
+#     ThirdSsnPorch +
+#     TotalAreaSF_LOG +
+#     TotalAreaSF_SQ +
+#     TotalBaths +
+#     Utilities +
+#     WoodDeckSF +
+#     YearBuilt +
+#     YearRemodAdd,
+#   data = data_all
+# )
+
+#kaggle .13482
+M <- lm(
+  SalePriceLog ~
+    Fireplaces +
+    GarageArea_LOG +
+    KitchenQual_Num +
+    LotArea_LOG +
+    OverallCond +
+    OverallQual +
+    TotalAreaSF_SQ +
+    TotalBsmt_SQ +
+    TotalBaths +
+    FirstFloor_SQ +
+    WoodDeckSF +
+    YearBuilt +
+    YearRemodAdd +
+    QualityTotalSF:NeighborhoodClass_Num +
+    QualityTotalSF_LOG:NeighborhoodClass_Num +
+    BsmtFinSF1:NeighborhoodClass_Num +
+    TotalAreaSF_LOG_SQ:NeighborhoodClass_Num ,
+
+  data = data_all
+)
+
+model <- generate_model_stats(M , data_all)
 generate_diagnosticPlots(model$finalModel)
 
-t1 = ols_step_both_adj_r2(M)
-t2 = ols_step_both_aic(M)
-t3 = ols_step_both_sbc(M)
-t4 = ols_step_both_sbic(M)
-t5 = ols_step_both_p(M)
+vif(model$finalModel)
 
-model_t1 <- generate_model_stats(t1$model, data_all)
-model_t2 <- generate_model_stats(t2$model, data_all)
-model_t3 <- generate_model_stats(t3$model, data_all)
-model_t4 <- generate_model_stats(t4$model, data_all)
-model_t5 <- generate_model_stats(t5$model, data_all)
+predictions <- predict(model, newdata = test_data)
 
-generate_diagnosticPlots(model_t1$finalModel)
-generate_diagnosticPlots(model_t2$finalModel)
-generate_diagnosticPlots(model_t3$finalModel)
-generate_diagnosticPlots(model_t4$finalModel)
-generate_diagnosticPlots(model_t5$finalModel)
+results <- data.frame(
+  Id = test_data$Id,
+  PredictionsLog = predictions,
+  SalePrice = exp(predictions)
+)
 
-ols_plot_added_variable(model_t1$finalModel)
+results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M6.1.1_minus_outliers.csv", row.names = FALSE)
+
+
+# t1 = ols_step_both_adj_r2(M)
+# t2 = ols_step_both_aic(M)
+# t3 = ols_step_both_sbc(M)
+# t4 = ols_step_both_sbic(M)
+# t5 = ols_step_both_p(M)
+# 
+# model_t1 <- generate_model_stats(t1$model, data_all)
+# model_t2 <- generate_model_stats(t2$model, data_all)
+# model_t3 <- generate_model_stats(t3$model, data_all)
+# model_t4 <- generate_model_stats(t4$model, data_all)
+# model_t5 <- generate_model_stats(t5$model, data_all)
+# 
+# generate_diagnosticPlots(model_t1$finalModel)
+# generate_diagnosticPlots(model_t2$finalModel)
+# generate_diagnosticPlots(model_t3$finalModel)
+# generate_diagnosticPlots(model_t4$finalModel)
+# generate_diagnosticPlots(model_t5$finalModel)
+# 
+# ols_plot_added_variable(model_t1$finalModel)
 
 
 # predictions <- predict(model, newdata = test_data)
@@ -1355,13 +1629,223 @@ ols_plot_added_variable(model_t1$finalModel)
 # 
 # results %>% select(Id, SalePrice) %>% write.csv("predictions/results_analysis_2_MLR_M6_minus_outliers.csv", row.names = FALSE)
 
-data_q <- data_all %>% filter(Id %in% c(376,1422, 810, 1182, 599, 956, 198, 1385, 1170, 399))
+# data_q <- data_all %>% filter(Id %in% c(376,1422, 810, 1182, 599, 956, 198, 1385, 1170, 399, 917, 810))
+# 
+# residuals <- rstudent(model$finalModel)  # Studentized residuals
+# leverage <- hatvalues(model$finalModel)
+# 
+# # Thresholds
+# high_residuals <- which(residuals < -2)  # Left-skewed problematic points
+# high_leverage <- which(leverage > (2 * mean(leverage)))  # High leverage points
+# 
+# # Combine and check indices
+# problem_points <- intersect(high_residuals, high_leverage)
+# print(problem_points)
+# 
+# # Plot diagnostic points
+# plot(residuals, leverage, main = "Residuals vs Leverage")
+# points(high_residuals, leverage[high_residuals], col = "red", pch = 19)
+# 
+# 
+# data_all <- data_all %>% filter(!(Id %in% c(1299,524, 250, 314, 666, 812)))
+# 
+# par(mfrow = c(2, 2))
+# for (var in names(data_c)[sapply(data_c, is.numeric)]) {
+#   hist(data_c[[var]], main = paste("Histogram of", var), xlab = var)
+# }
+# 
+# max_row <- data_all %>%
+#   filter(HasBsmt == 'Yes') %>%
+#   filter(SalePriceLog == min(SalePriceLog, na.rm = TRUE))
+# 
+# print(max_row)
+
+```
+
+
+Model analysis stuff
+
+
+```{r}
+
+library(corrplot)
+
+#l <- lm(SalePriceLog ~ ., data = data_all %>% select(-Id, -SalePrice))
+#r <- ols_step_both_aic(l)
+
+#saveRDS(r$model, 'models/potential_m6.rds')
+
+outlierTest(model$finalModel)
+
+ols_plot_added_variable(model$finalModel)
+
+vif(model$finalModel)
+
+model_vars <- all.vars(terms(model$results))
+
+# Subset the data with those variables
+model_data <- data_all[, model_vars]
+
+numeric_model_data <- model_data[, sapply(model_data, is.numeric)]
+
+# Compute correlation matrix
+cor_matrix <- cor(numeric_model_data, use = "pairwise.complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+
+# paste(model_vars, collapse = " + ")
+# 
+# 
+# m <- lm(SalePriceLog ~ OverallQual + Neighborhood + OverallCond + YearBuilt + LotArea_LOG + MSZoning + Functional + SaleCondition + KitchenQual + Condition1 + HeatingQC_Num + BsmtExposure + Exterior1st + TotalAreaSF_LOG + ScreenPorch + YearRemodAdd + Fireplaces + Foundation + PoolQC + SaleType + BsmtQual + TotalBaths + CentralAir + GrLivArea + BsmtFinType1_Num +  Heating + LotConfig + WoodDeckSF + ExterCond + MasVnrType + TotalAreaSF_SQ + LandSlope + HalfBath + BsmtFinSF1 + BsmtFinSF2 + GarageArea_LOG + EnclosedPorch + KitchenAbvGr + Street + BsmtFinSF2_LOG + OpenPorchSF + ThirdSsnPorch + Utilities, data = data_all)
+# 
+# vif(m)
+
+
+
+```
+
+###### RFE
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)  # For pivot_longer
+
+# Function to visualize SalePriceLog by Neighborhood
+plot_neighborhood_analysis <- function(data, price_var = "", neighborhood_var = "Neighborhood") {
+  
+  # 1. Boxplot of SalePriceLog by Neighborhood
+  p1 <- ggplot(data, aes_string(x = neighborhood_var, y = price_var)) +
+    geom_boxplot(fill = "lightblue", color = "black", outlier.color = "red") +
+    labs(title = "Boxplot of SalePriceLog by Neighborhood",
+         x = "Neighborhood", y = "SalePriceLog") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+  
+  print(p1)
+  
+  # 2. Mean and Median SalePriceLog for each neighborhood
+  summary_stats <- data %>%
+    group_by(!!sym(neighborhood_var)) %>%
+    summarise(
+      Mean = mean(!!sym(price_var), na.rm = TRUE),
+      Median = median(!!sym(price_var), na.rm = TRUE)
+    ) %>%
+    pivot_longer(cols = c("Mean", "Median"), names_to = "Statistic", values_to = "Value")
+  
+  # Bar chart of Mean and Median SalePriceLog
+  p2 <- ggplot(summary_stats, aes(x = reorder(!!sym(neighborhood_var), -Value), y = Value, fill = Statistic)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = "Mean and Median SalePriceLog by Neighborhood",
+         x = "Neighborhood", y = "SalePriceLog") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+  
+  print(p2)
+  
+  # Return summary stats for further analysis
+  return(summary_stats)
+}
+
+# Example usage:
+# Assuming 'data_all' is your dataset with 'SalePriceLog' and 'Neighborhood'
+summary_stats <- plot_neighborhood_analysis(data_all %>% mutate(SalePrice = exp(SalePriceLog)), "SalePrice", "Neighborhood")
+
+```
+
+
+
+```{r}
+
+data_all <- preprocess_data_with_response(data)
+
+set.seed(100)
+
+# Step 1: Custom summary function for RMSE
+customSummary <- function(data, lev = NULL, model = NULL) {
+  RMSE <- sqrt(mean((data$obs - data$pred)^2))
+  c(RMSE = RMSE)  # Named list for RMSE
+}
+
+# Step 2: Extend caretFuncs to use custom summary function
+customFuncs <- caretFuncs  # Clone caretFuncs
+customFuncs$summary <- customSummary  # Replace the summary function
+
+control <- rfeControl(functions = customFuncs,  # Use Linear Regression
+                      method = "cv",       # Cross-validation
+                      number = 10,         # 10-fold CV
+                      verbose = TRUE)
+
+predictors <- data_all %>% select(-SalePriceLog, -SalePrice)  # Remove the target variable
+target <- data.frame(SalePriceLog = data_all$SalePriceLog)
+
+# predictors <- data_all %>% select(where(is.numeric)) 
+# data_new <- data.frame(predictors, target)
+
+# Preprocess the data: scaling, centering, imputation, and dummy variables
+preProcess_params <- preProcess(predictors, 
+                                method = c("center", "scale"))
+
+# Apply preprocessing to the predictors
+predictors_processed <- predict(preProcess_params, predictors)
+
+# Convert categorical variables to dummy variables
+dummy_params <- dummyVars("~ .", data = predictors_processed)
+
+# Apply dummy encoding
+predictors_final <- predict(dummy_params, newdata = predictors_processed)
+
+predictors_final <- as.data.frame(predictors_final) %>% select(where(is.numeric))
+
+predictors_final <- predictors_final %>% select(where(is.numeric)) 
+
+data_new <- cbind(predictors_final, target)
+
+num_cores <- parallel::detectCores() - 2
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+# Run RFE
+results <- rfe(SalePriceLog ~ ., data = data_new, rfeControl = control, metric = "RMSE")
+
+stopCluster(cl)
+
+# View results
+print(results)
 
 ```
 
 
 ```{r}
 
+# ANOVA Test
+
+data_all <- preprocess_data_with_response(data)
+
+anova_result <- aov(SalePriceLog ~ NeighborhoodClass, data = data_all)
+summary(anova_result)
+
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+# Pairwise comparisons using ggpubr
+library(ggpubr)
+
+ggboxplot(data_all, x = "NeighborhoodClass", y = "SalePriceLog", 
+          color = "Neighborhood") +
+  stat_compare_means(method = "kruskal.test") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+
+```{r}
+library(dplyr)
 data_c <- preprocess_data_with_response(data)
 data_c$group1 <- ifelse(data_c$Id %in% c(376,1422, 810, 1182, 599, 956, 198, 1385, 1170, 399), 1, 0)
 
@@ -1376,9 +1860,49 @@ M <- lm(group1 ~
 
 library(FSelector)
 library(scorecard)
+library(rpart)
 
-bins <- woebin(data_all %>% where(is.factor), y = "SalePriceLog")
+tree <- rpart(SalePriceLog ~ ., data = data_all %>% select(-SalePrice), method = "anova")
+summary(tree)
 
+
+library(randomForest)
+
+data_all <- preprocess_data_with_response(data)
+
+# Fit a random forest model (replace SalePrice with your target variable)
+rf_model <- randomForest(SalePriceLog ~ ., data = data_all %>% select(-SalePrice), importance = TRUE, ntree = 500)
+
+# View variable importance
+importance(rf_model)  # Gini index or %IncMSE
+varImpPlot(rf_model)  # Visualize importance
+
+
+
+library(rpart)
+library(rpart.plot)
+
+# List of categorical variables
+cat_vars <- names(data_all)[sapply(data_all, is.factor)]
+
+# Function to bin categorical variables using decision trees
+bin_with_tree <- function(data, cat_var, target) {
+  tree <- rpart(as.formula(paste(target, "~", cat_var)), data = data, method = "anova")
+  predictions <- predict(tree, data)
+  
+  # Group levels based on predicted values
+  binned_levels <- cut(predictions, breaks = 3, labels = c("Low", "Medium", "High"))
+  return(as.factor(binned_levels))
+}
+
+# Apply tree-based binning to all categorical variables
+for (var in cat_vars) {
+  new_var_name <- paste0(var, "_Binned")
+  data_all[[new_var_name]] <- bin_with_tree(data_all, var, "SalePrice")
+}
+
+# Check the results
+str(data_all)
 ```
 
 
@@ -1451,6 +1975,92 @@ formulas <- do.call(c, formulas)
 names(data_all)
 ```
 
+
+```{r}
+
+library(glmnet)
+
+data_all <- preprocess_data_with_response(data)
+
+# Prepare data
+x <- model.matrix(SalePriceLog ~ ., data = data_all)[, -1]  # Remove intercept
+y <- data_all$SalePriceLog
+
+# Run Lasso Regression (alpha = 1 for Lasso)
+set.seed(123)
+lasso_model <- cv.glmnet(x, y, alpha = 1, family = "gaussian")
+
+# Plot cross-validation results
+plot(lasso_model)
+
+# Coefficients at optimal lambda
+coef(lasso_model, s = "lambda.min")
+
+
+```
+
+```{r}
+
+# Load required libraries
+library(mlr3)
+library(mlr3fselect)  # Feature selection extension
+library(mlr3learners) # Learners like linear regression
+library(mlr3viz)      # For visualization
+library(paradox)      # Parameter search space
+library(mlr3pipelines)
+library(mlr3filters)
+
+
+# Near-Zero Variance Filter Operator
+filter_nzv <- po("filter", filter = flt("variance"), param_vals = list(filter.cutoff = 0.01))
+
+# Preprocessing pipeline: near-zero variance filtering, scaling, and one-hot encoding
+preprocess_pipeline <- gunion(list(
+  filter_nzv,                       # Remove near-zero variance features
+  po("scale"),                      # Center and scale numeric features
+  po("encode", method = "one-hot")  # Encode categorical features
+))
+
+# Step 1: Define the Task
+# Assume 'SalePriceLog' is the target variable
+task <- TaskRegr$new(id = "house_prices", backend = data_all, target = "SalePriceLog")
+
+# Step 2: Define the Learner (Linear Regression)
+learner <- lrn("regr.lm")
+
+pipeline <- preprocess_pipeline %>% learner
+
+# Step 3: Define the Resampling Strategy
+resampling <- rsmp("cv", folds = 5)  # 5-fold cross-validation
+
+# Step 4: Define the Feature Selection Terminator
+# Stop after evaluating 50 feature subsets
+terminator <- trm("evals", n_evals = 50)
+
+# Step 5: Define the Feature Selection Strategy (RFE)
+fselector <- FSelectorBatchSequential$new()
+
+# Step 6: AutoFSelector (Automates feature selection process)
+auto_fselector <- AutoFSelector$new(
+  learner = learner,
+  resampling = resampling,
+  measure = msr("regr.rsq"),  # Use R-squared for evaluation
+  terminator = terminator,
+  fselector = fselector
+)
+
+# Step 7: Train AutoFSelector
+set.seed(123)
+auto_fselector$train(task)
+
+# Step 8: View Results
+# Selected features
+print(auto_fselector$result_feature_set)
+
+# Plot the feature selection process
+autoplot(auto_fselector)
+```
+
 maybe we can loop through stepwise a few times at different seeds and see if there is a consensus.
 
 ```{r}
@@ -1502,6 +2112,152 @@ generate_model_stats(model_custom, data_testing)
 
 
 #### Experimental stuff
+
+
+```{r}
+
+library(quantreg)
+
+# M <- lm(
+#   SalePriceLog ~
+#     BsmtExposure_Num +
+#     BsmtFinSF1 +
+#     BsmtFinSF2 +
+#     BsmtFinSF2_LOG +
+#     BsmtFinType1_Num +
+#     BsmtQual_Num +
+#     CentralAir +
+#     Condition1 +
+#     EnclosedPorch +
+#     ExterCond_Num +
+#     Exterior1st +
+#     Fireplaces +
+#     Foundation +
+#     Functional_Num +
+#     GarageArea_LOG +
+#     HalfBath +
+#     Heating +
+#     HeatingQC_Num +
+#     KitchenAbvGr +
+#     KitchenQual_Num +
+#     LandSlope +
+#     LotArea_LOG +
+#     LotConfig +
+#     MasVnrType +
+#     MSZoning +
+#     Neighborhood +
+#     OpenPorchSF +
+#     OverallCond +
+#     OverallQual +
+#     PoolQC_Num +
+#     SaleCondition +
+#     SaleType +
+#     ScreenPorch +
+#     Street +
+#     ThirdSsnPorch +
+#     TotalAreaSF_LOG +
+#     TotalAreaSF_SQ +
+#     TotalBaths +
+#     Utilities +
+#     WoodDeckSF +
+#     YearBuilt +
+#     YearRemodAdd,
+#   data = data_all
+# )
+
+# Fit a quantile regression at the 15th percentile (tau = 0.15)
+mod_qr <- lm(SalePriceLog ~
+    BsmtExposure_Num +
+    BsmtFinSF1 +
+    BsmtFinSF2 +
+    BsmtFinSF2_LOG +
+    BsmtFinType1_Num +
+    BsmtQual_Num +
+    CentralAir +
+    Condition1 +
+    EnclosedPorch +
+    ExterCond_Num +
+    Exterior1st +
+    Fireplaces +
+    Foundation +
+    Functional_Num +
+    GarageArea_LOG +
+    HalfBath +
+    Heating +
+    HeatingQC_Num +
+    KitchenAbvGr +
+    KitchenQual_Num +
+    LandSlope +
+    LotArea_LOG +
+    LotConfig +
+    MasVnrType +
+    MSZoning +
+    Neighborhood +
+    OpenPorchSF +
+    OverallCond +
+    OverallQual +
+    PoolQC_Num +
+    SaleCondition +
+    SaleType +
+    ScreenPorch +
+    Street +
+    ThirdSsnPorch +
+    TotalAreaSF_LOG +
+    TotalAreaSF_SQ +
+    TotalBaths +
+    Utilities +
+    WoodDeckSF +
+    YearBuilt +
+    YearRemodAdd,
+  data = data_all, tau = 0.15)
+
+alias(mod_qr)
+
+summary(mod_qr)
+
+
+
+cutoff <- quantile(data_all$SalePriceLog, 0.15)
+low_price_data <- subset(data_all, SalePriceLog <= cutoff)
+
+
+weights <- FSelector::information.gain(Q ~ ., data = data_all %>% select(-SalePrice, -SalePriceLog))
+# Sort by importance
+weights_sorted <- weights[order(weights$attr_importance, decreasing = TRUE), ]
+
+# Take the top 10 variables
+top10 <- rownames(weights_sorted)[1:10]
+print(top10)
+
+library(FSelectorRcpp)
+
+
+
+weights <- linearCorrelation(SalePriceLog ~ ., data = low_price_data %>% select(-SalePrice))
+print(weights)
+
+# Then select top features
+subset <- cutoff.k(weights, 10)
+
+
+data_all <- preprocess_data_with_response(data)
+
+bottom_cutoff <- quantile(data_all$SalePriceLog, 0.05, na.rm = TRUE)
+data_all$Q5 <- ifelse(data_all$SalePriceLog <= bottom_cutoff, "bottom", "else")
+              
+bottom_cutoff <- quantile(data_all$SalePriceLog, 0.10, na.rm = TRUE)
+data_all$Q10 <- ifelse(data_all$SalePriceLog <= bottom_cutoff, "bottom", "else")
+
+bottom_cutoff <- quantile(data_all$SalePriceLog, 0.15, na.rm = TRUE)
+data_all$Q15 <- ifelse(data_all$SalePriceLog <= bottom_cutoff, "bottom", "else")
+
+bottom_cutoff <- quantile(data_all$SalePriceLog, 0.20, na.rm = TRUE)
+data_all$Q20 <- ifelse(data_all$SalePriceLog <= bottom_cutoff, "bottom", "else")
+
+explore(data_all %>% select(-SalePrice, -SalePriceLog, -Id, -Q5, -Q10, -Q20))
+
+```
+
 
 ```{r}
 library(olsrr)
